@@ -35,9 +35,39 @@ var (
 		`c:\program files\`,
 		`c:\program files (x86)\`,
 	}
-	suspiciousProcessNames = []string{ // Nome de processos suspeitos
-		"powershell", "cmd.exe", "wscript", "cscript", "mshta",
-		"rundll32", "regsvr32", "bitsadmin", "certutil", "wmic",
+	// Lista de nomes de processos suspeitos em sistemas Windows.
+	// Cada processo é comentado com uma breve descrição do motivo da suspeita.
+	suspiciousProcessNames = []string{
+		// Processos já existentes
+		"powershell",         // Utilizado para scripts; frequentemente abusado para execução de código malicioso.
+		"cmd.exe",            // Prompt de comando; pode ser usado para executar comandos maliciosos.
+		"wscript",            // Host de scripts Windows; pode executar scripts maliciosos.
+		"cscript",            // Host de scripts Windows em modo de console; similar ao wscript.
+		"mshta",              // Utilitário para executar aplicações HTML; pode ser usado para hospedar código malicioso.
+		"rundll32",           // Executa funções em DLLs; pode ser abusado para carregar e executar código malicioso.
+		"regsvr32",           // Registra DLLs; frequentemente usado para executar scripts ou código malicioso.
+		"bitsadmin",          // Gerencia transferências em segundo plano; pode ser usado para baixar payloads maliciosos.
+		"certutil",           // Ferramenta para manipular certificados; pode ser usada para decodificar dados maliciosos.
+		"wmic",               // Interface de linha de comando para WMI; pode executar comandos maliciosos no sistema.
+		"installutil.exe",    // Ferramenta .NET para instalar serviços; pode ser usada para executar código arbitrário.
+		"schtasks.exe",       // Permite agendar tarefas; pode ser usado para persistência ou execução futura de payloads.
+		"taskhost.exe",       // Hospeda processos do Windows; pode ser explorado para mascarar atividades maliciosas.
+		"taskeng.exe",        // Motor de agendamento de tarefas; potencial para abuso em agendamentos maliciosos.
+		"powershell_ise.exe", // Ambiente interativo do PowerShell; permite a execução e depuração de scripts maliciosos.
+		"msiexec.exe",        // Instalador do Windows para pacotes MSI; pode instalar software malicioso disfarçado.
+		"reg.exe",            // Manipula o registro do Windows; pode alterar configurações de segurança ou persistência.
+		"regedit.exe",        // Editor do registro; similar ao reg.exe, com capacidade para modificar configurações críticas.
+		"vssadmin.exe",       // Gerencia snapshots de volume; pode excluir backups ou esconder atividades.
+		"at.exe",             // Agendamento de tarefas; similar ao schtasks.exe, permitindo agendar execuções maliciosas.
+		"net.exe",            // Executa comandos de rede; pode ser usado para movimentação lateral ou modificações de rede.
+		"netsh.exe",          // Configurações de rede; pode alterar configurações de firewall ou rede para benefício malicioso.
+		"ftp.exe",            // Cliente FTP do Windows; pode transferir dados para ou de servidores controlados pelo atacante.
+		"conhost.exe",        // Processo legítimo, mas pode ser explorado para ocultar atividades maliciosas ou injetar código.
+		"bitsadmin.exe",      // Gerencia transferências de arquivos em segundo plano; pode ser usado para baixar malware.
+		"lp.exe",             // Processo de impressão; pode ser abusado para executar comandos no sistema.
+		"rmi.exe",            // Pode referir-se a diversos processos; análise adicional necessária.
+		"cscript.exe",        // Já incluído, mas reforça a capacidade de executar scripts via linha de comando.
+		"wscript.exe",        // Já incluído, similar ao cscript.exe para execução de scripts.
 	}
 )
 

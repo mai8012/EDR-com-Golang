@@ -24,21 +24,29 @@ type SuspiciousProcess struct {
 // Variáveis e listas de suspeitos
 var (
 	ignoredExecutables = []string{}
-	allowedProcesses   = make(map[string]bool)
-	suspiciousCache    = sync.Map{}
-	suspiciousDirs     = []string{ //Diretório monitorado
-		`c:\`, // Use letras minúsculas por consistência
+
+	// Exemplo de processos ou caminhos que você quer explicitamente permitir.
+	// Por padrão está vazio.
+	allowedProcesses = make(map[string]bool)
+
+	// Cache para saber se um processo suspeito já foi logado/suspenso
+	suspiciousCache sync.Map
+
+	// Diretórios que queremos monitorar
+	suspiciousDirs = []string{
+		"c:\\", // sempre em minúsculo, com barras invertidas escapadas
 	}
-	ignoredDirs = []string{ // Diretórios a serem ignorados
-		`c:\windows\`,
-		`c:\programdata\`,
-		`c:\program files\`,
-		`c:\program files (x86)\`,
+
+	// Diretórios a serem ignorados (exceto se o processo for suspeito)
+	ignoredDirs = []string{
+		"c:\\windows\\",
+		"c:\\programdata\\",
+		"c:\\program files\\",
+		"c:\\program files (x86)\\",
 	}
-	// Lista de nomes de processos suspeitos em sistemas Windows.
-	// Cada processo é comentado com uma breve descrição do motivo da suspeita.
+
+	// Nomes parciais ou exatos de processos suspeitos
 	suspiciousProcessNames = []string{
-		// Processos já existentes
 		"powershell",         // Utilizado para scripts; frequentemente abusado para execução de código malicioso.
 		"cmd.exe",            // Prompt de comando; pode ser usado para executar comandos maliciosos.
 		"wscript",            // Host de scripts Windows; pode executar scripts maliciosos.
@@ -51,7 +59,6 @@ var (
 		"wmic",               // Interface de linha de comando para WMI; pode executar comandos maliciosos no sistema.
 		"installutil.exe",    // Ferramenta .NET para instalar serviços; pode ser usada para executar código arbitrário.
 		"schtasks.exe",       // Permite agendar tarefas; pode ser usado para persistência ou execução futura de payloads.
-		"taskhost.exe",       // Hospeda processos do Windows; pode ser explorado para mascarar atividades maliciosas.
 		"taskeng.exe",        // Motor de agendamento de tarefas; potencial para abuso em agendamentos maliciosos.
 		"powershell_ise.exe", // Ambiente interativo do PowerShell; permite a execução e depuração de scripts maliciosos.
 		"msiexec.exe",        // Instalador do Windows para pacotes MSI; pode instalar software malicioso disfarçado.
@@ -62,7 +69,6 @@ var (
 		"net.exe",            // Executa comandos de rede; pode ser usado para movimentação lateral ou modificações de rede.
 		"netsh.exe",          // Configurações de rede; pode alterar configurações de firewall ou rede para benefício malicioso.
 		"ftp.exe",            // Cliente FTP do Windows; pode transferir dados para ou de servidores controlados pelo atacante.
-		"conhost.exe",        // Processo legítimo, mas pode ser explorado para ocultar atividades maliciosas ou injetar código.
 		"bitsadmin.exe",      // Gerencia transferências de arquivos em segundo plano; pode ser usado para baixar malware.
 		"lp.exe",             // Processo de impressão; pode ser abusado para executar comandos no sistema.
 		"rmi.exe",            // Pode referir-se a diversos processos; análise adicional necessária.
@@ -72,24 +78,99 @@ var (
 )
 
 const (
-	processScanInterval = 10 * time.Second
+	processScanInterval = 5 * time.Second
 )
 
-// Syscall definitions
+// Syscall definitions para suspender/resumir processos
 var (
 	ntdll            = windows.NewLazySystemDLL("ntdll.dll")
 	ntSuspendProcess = ntdll.NewProc("NtSuspendProcess")
 	ntResumeProcess  = ntdll.NewProc("NtResumeProcess")
 )
 
+// Suspende e retoma processos
+const PROCESS_SUSPEND_RESUME uint32 = 0x0800
+
+func suspendProcess(pid int) error {
+	handle, err := windows.OpenProcess(PROCESS_SUSPEND_RESUME, false, uint32(pid))
+	if err != nil {
+		return fmt.Errorf("não foi possível abrir o processo PID %d: %v", pid, err)
+	}
+	defer windows.CloseHandle(handle)
+
+	r, _, _ := ntSuspendProcess.Call(uintptr(handle))
+	if r != 0 {
+		return fmt.Errorf("erro ao suspender o processo PID %d", pid)
+	}
+	return nil
+}
+
+func ResumeProcess(pid int) error {
+	handle, err := windows.OpenProcess(PROCESS_SUSPEND_RESUME, false, uint32(pid))
+	if err != nil {
+		return fmt.Errorf("não foi possível abrir o processo PID %d: %v", pid, err)
+	}
+	defer windows.CloseHandle(handle)
+
+	r, _, _ := ntResumeProcess.Call(uintptr(handle))
+	if r != 0 {
+		return fmt.Errorf("erro ao retomar o processo PID %d", pid)
+	}
+	return nil
+}
+
+// Verifica se um caminho está em algum diretório ignorado
 func isIgnoredDirectory(path string) bool {
-	lowerPath := strings.ToLower(path) // Normalizar para minúsculas
+	lowerPath := strings.ToLower(path)
 	for _, ignored := range ignoredDirs {
-		if strings.HasPrefix(lowerPath, ignored) { // Comparar com diretórios ignorados em minúsculas
+		if strings.HasPrefix(lowerPath, ignored) {
 			return true
 		}
 	}
 	return false
+}
+
+// Verifica se é um executável ignorado explicitamente ou permitido (whitelist)
+func isIgnored(exePath string) bool {
+	lowerExePath := strings.ToLower(exePath)
+	for _, ign := range ignoredExecutables {
+		if lowerExePath == strings.ToLower(ign) {
+			return true
+		}
+	}
+	return allowedProcesses[lowerExePath]
+}
+
+// Verifica se já foi logado como suspeito (para não suspender/logar repetidamente)
+func alreadyLogged(key string) bool {
+	_, found := suspiciousCache.Load(key)
+	return found
+}
+
+// Cria uma "chave" para identificar unicamente um processo
+func makeKey(pid int, exePath string) string {
+	return fmt.Sprintf("%d|%s", pid, strings.ToLower(strings.TrimSpace(exePath)))
+}
+
+// Retorna um IP interno (ou "Não encontrado")
+func gatherLocalIPs() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "Não encontrado"
+	}
+	for _, addr := range addrs {
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ip := v.IP
+			if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
+				// Ajuste se sua rede não for 192.168.x.x
+				if strings.HasPrefix(ip.String(), "192.168.") {
+					return ip.String()
+				}
+			}
+		}
+	}
+	return "Não encontrado"
 }
 
 // WatchProcesses monitora processos e suspende suspeitos
@@ -109,40 +190,43 @@ func WatchProcesses(suspicionsChan chan<- SuspiciousProcess) {
 		for _, p := range processes {
 			exe, errExe := p.Exe()
 			name, errName := p.Name()
-
 			if errExe != nil || errName != nil || exe == "" || name == "" {
 				continue
 			}
 
-			// Ignorar processos em diretórios ignorados
-			if isIgnoredDirectory(exe) {
-				continue
-			}
-
-			// Ignorar processos permitidos
-			if isIgnored(exe) {
-				continue
-			}
-
-			// Verificar se está em diretórios suspeitos
-			isFromSuspiciousDir := false
-			exeLower := strings.ToLower(exe) // Normalize o caminho do executável
-			for _, dir := range suspiciousDirs {
-				if strings.HasPrefix(exeLower, dir) { // Use HasPrefix para comparar diretórios
-					isFromSuspiciousDir = true
-					break
-				}
-			}
-
-			// Verificar se o nome está na lista de suspeitos
+			// 1. Verificar se o nome do processo está na lista de suspeitos
 			isSuspectProcess := false
+			lowerName := strings.ToLower(name)
 			for _, suspect := range suspiciousProcessNames {
-				if strings.Contains(strings.ToLower(name), suspect) {
+				if strings.Contains(lowerName, suspect) {
 					isSuspectProcess = true
 					break
 				}
 			}
 
+			// 2. Se não for suspeito, então verificamos se está em diretório ignorado
+			//    Se for suspeito, ignoramos essa checagem para pegá-lo mesmo se estiver em c:\windows\
+			if !isSuspectProcess && isIgnoredDirectory(exe) {
+				continue
+			}
+
+			// 3. Ignorar processos explicitamente permitidos/whitelisted
+			if isIgnored(exe) {
+				continue
+			}
+
+			// 4. Verificar se está em diretórios suspeitos
+			exeLower := strings.ToLower(exe)
+			isFromSuspiciousDir := false
+			for _, dir := range suspiciousDirs {
+				if strings.HasPrefix(exeLower, dir) {
+					isFromSuspiciousDir = true
+					break
+				}
+			}
+
+			// Agora, se vier de um diretório suspeito OU for um processo suspeito,
+			// iremos logar e suspender
 			if isFromSuspiciousDir || isSuspectProcess {
 				key := makeKey(int(p.Pid), exe)
 				activeKeys[key] = true
@@ -152,8 +236,7 @@ func WatchProcesses(suspicionsChan chan<- SuspiciousProcess) {
 						name, exe, p.Pid, ipString, hostname)
 
 					// Suspende o processo
-					err := suspendProcess(int(p.Pid))
-					if err != nil {
+					if err := suspendProcess(int(p.Pid)); err != nil {
 						log.Printf("Erro ao suspender processo PID %d: %v", p.Pid, err)
 					} else {
 						log.Printf("Processo PID %d suspenso enquanto aguarda decisão.", p.Pid)
@@ -174,7 +257,7 @@ func WatchProcesses(suspicionsChan chan<- SuspiciousProcess) {
 			}
 		}
 
-		// Limpar processos não ativos
+		// Limpar chaves que não estão mais ativas
 		suspiciousCache.Range(func(k, v interface{}) bool {
 			keyStr := k.(string)
 			if !activeKeys[keyStr] {
@@ -185,75 +268,4 @@ func WatchProcesses(suspicionsChan chan<- SuspiciousProcess) {
 
 		time.Sleep(processScanInterval)
 	}
-}
-
-// Constantes para permissões de processo
-const PROCESS_SUSPEND_RESUME uint32 = 0x0800
-
-// Suspende um processo pelo PID (Windows)
-func suspendProcess(pid int) error {
-	handle, err := windows.OpenProcess(PROCESS_SUSPEND_RESUME, false, uint32(pid))
-	if err != nil {
-		return fmt.Errorf("não foi possível abrir o processo PID %d: %v", pid, err)
-	}
-	defer windows.CloseHandle(handle)
-
-	r, _, _ := ntSuspendProcess.Call(uintptr(handle))
-	if r != 0 {
-		return fmt.Errorf("erro ao suspender o processo PID %d", pid)
-	}
-	return nil
-}
-
-// Retoma um processo pelo PID (Windows)
-func ResumeProcess(pid int) error {
-	handle, err := windows.OpenProcess(PROCESS_SUSPEND_RESUME, false, uint32(pid))
-	if err != nil {
-		return fmt.Errorf("não foi possível abrir o processo PID %d: %v", pid, err)
-	}
-	defer windows.CloseHandle(handle)
-
-	r, _, _ := ntResumeProcess.Call(uintptr(handle))
-	if r != 0 {
-		return fmt.Errorf("erro ao retomar o processo PID %d", pid)
-	}
-	return nil
-}
-
-func isIgnored(exePath string) bool {
-	lowerExePath := strings.ToLower(exePath)
-	for _, ign := range ignoredExecutables {
-		if lowerExePath == strings.ToLower(ign) {
-			return true
-		}
-	}
-	return allowedProcesses[lowerExePath]
-}
-
-func gatherLocalIPs() string {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return "Não encontrado"
-	}
-	for _, addr := range addrs {
-		switch v := addr.(type) {
-		case *net.IPNet:
-			ip := v.IP
-			if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
-				if strings.HasPrefix(ip.String(), "192.168.") { //Adicione sua faixa de IP
-					return ip.String()
-				}
-			}
-		}
-	}
-	return "Não encontrado"
-}
-
-func makeKey(pid int, exePath string) string {
-	return fmt.Sprintf("%d|%s", pid, strings.ToLower(strings.TrimSpace(exePath)))
-}
-
-func alreadyLogged(key string) bool {
-	_, found := suspiciousCache.Load(key)
-	return found
 }

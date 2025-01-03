@@ -26,18 +26,9 @@ Comunicação com o Servidor:
 
 Mapeamento de Mensagens: Mantém um mapeamento de IDs de mensagens para processos suspeitos, garantindo que cada decisão recebida corresponda ao processo correto.
 Tratamento de Respostas Automáticas: Em caso de perda de conexão com o servidor, o agente envia automaticamente a resposta "n" para todos os processos pendentes, finalizando-os.
-Envio de Logs por Email:
 
 Detecção de Perda de Conexão: Monitora a conexão com o servidor e detecta qualquer perda de conexão.
 Reconexão Automática: Tenta reconectar automaticamente ao servidor em caso de falha na conexão.
 Gestão de Mensagens Pendentes: Assegura que todas as mensagens pendentes sejam tratadas adequadamente em caso de desconexão.
-Estrutura do Código
-Pacotes Importados:
 
-Utiliza pacotes padrão do Go como net, os, log, entre outros.
-Depende de pacotes externos como gopsutil para interação com processos do sistema e golang.org/x/sys/windows para chamadas de sistema específicas do Windows.
 
-Monitoramento de Processos: Monitora continuamente os processos em execução.
-Processamento de Decisões: Trata as respostas recebidas do servidor.
-Envio de Logs por Email: Gerencia o envio periódico de logs.
-Gerenciamento de Conexão: Mantém a conexão com o servidor e lida com reconexões.

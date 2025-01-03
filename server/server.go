@@ -1,252 +1,216 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"fmt"
 	"log"
-	"net"
-	"strings"
+	"net/http"
+	"os"
 	"sync"
+	"time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
+	"github.com/gorilla/mux"
 )
 
-// Endereço em que o servidor irá escutar.
-const serverAddress = "0.0.0.0:8080" //Define a porta a sua escolha
-
-// suspectRequest representa uma mensagem [SUSPEITO] recebida,
-// incluindo a conexão de onde veio e um ID único.
-type suspectRequest struct {
-	id      int
-	conn    net.Conn
-	message string
+type SuspectRequest struct {
+	ID      int    `json:"id"`
+	Message string `json:"message"`
+	Agent   string `json:"agent"`
 }
 
-// Canal (fila) para armazenar todas as mensagens [SUSPEITO].
-var suspectChan = make(chan suspectRequest, 1000)
+type Decision struct {
+	MessageID int    `json:"message_id"`
+	Response  string `json:"response"`
+}
 
-// Canal para enviar funções de atualização da UI para a goroutine principal.
-var uiChan = make(chan func(), 1000)
-
-// Variáveis globais para interface e sincronização.
 var (
-	messages       *widget.Label // Área onde exibimos os logs
-	input          *widget.Entry // Campo de texto para resposta
-	currentMessage *widget.Label // Label para mostrar a mensagem atual
-	sendButton     *widget.Button
-	inputLock      sync.Mutex // Lock para manipular input/botão
-
-	// Variáveis para atribuir IDs únicos às mensagens suspeitas.
-	suspectID     int
-	suspectIDLock sync.Mutex
-
-	// Mapa para rastrear mensagens [SUSPEITO] pendentes e evitar duplicatas.
-	pendingMessages     map[string]bool = make(map[string]bool)
-	pendingMessagesLock sync.Mutex
+	suspectChan          = make(chan SuspectRequest, 1000)
+	uiChan               = make(chan func(), 1000)
+	messages             = []SuspectRequest{}
+	messagesLock         sync.Mutex
+	pendingResponses     = make(map[int]string)
+	pendingResponsesLock sync.Mutex
+	suspectID            int
+	suspectIDLock        sync.Mutex
 )
 
 func main() {
-	// Cria a aplicação Fyne
-	a := app.New()
-	w := a.NewWindow("Servidor TCP")
-	w.Resize(fyne.NewSize(600, 400))
+	r := mux.NewRouter()
 
-	// Label para exibir as mensagens no servidor
-	messages = widget.NewLabel("")
-	scroll := container.NewVScroll(messages)
-	scroll.SetMinSize(fyne.NewSize(600, 250)) // Ajustado para dar espaço para currentMessage
+	// Endpoints
+	r.HandleFunc("/api/suspects", handleReceiveSuspect).Methods("POST")
+	r.HandleFunc("/api/suspects/{id}/response", handleRespondSuspect).Methods("POST")
+	r.HandleFunc("/api/suspects", handleListSuspects).Methods("GET")
+	r.HandleFunc("/api/suspects/responses", handleGetResponses).Methods("GET")
 
-	// Label para exibir a mensagem atual sendo respondida
-	currentMessage = widget.NewLabel("Nenhuma mensagem para responder no momento.")
-	currentMessage.Wrapping = fyne.TextWrapWord
+	// Servir arquivos estáticos e a interface web
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/")))
 
-	// Campo de entrada para a resposta (y/n)
-	input = widget.NewEntry()
-	input.SetPlaceHolder("Digite sua resposta (y/n)...")
-
-	// Botão "Enviar"
-	sendButton = widget.NewButton("Enviar", func() {})
-	sendButton.Disable() // Começa desabilitado
-
-	// Layout da interface
-	w.SetContent(container.NewBorder(
-		nil, // topo
-		container.NewVBox(
-			currentMessage, // Label para mensagem atual
-			container.NewVBox(
-				input,      // Campo de entrada
-				sendButton, // Botão Enviar ao lado
-			),
-		), // Layout na parte inferior
-		nil, nil, // Sem conteúdo nas laterais
-		scroll, // Conteúdo central (área de rolagem)
-	))
-
-	// Inicia o servidor em background
-	go startServer()
-
-	// Inicia o consumidor da fila de [SUSPEITO]
+	// Iniciar o consumidor da fila de [SUSPEITO]
 	go handleSuspects()
 
-	// Inicia a goroutine de atualização da UI
+	// Iniciar o consumidor da UI
 	go handleUIUpdates()
 
-	// Exibe a janela e executa
-	w.ShowAndRun()
+	fmt.Println("Servidor HTTP iniciado na porta 8080")
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
-// startServer inicia o servidor TCP e aguarda conexões.
-func startServer() {
-	ln, err := net.Listen("tcp", serverAddress)
-	if err != nil {
-		enqueueUIUpdate(func() {
-			appendMessage(fmt.Sprintf("Erro ao iniciar listener: %v\n", err))
-		})
+// handleReceiveSuspect recebe suspeitas dos agentes via POST
+func handleReceiveSuspect(w http.ResponseWriter, r *http.Request) {
+	var req SuspectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer ln.Close()
 
-	enqueueUIUpdate(func() {
-		appendMessage(fmt.Sprintf("Servidor escutando em %s...\n", serverAddress))
-	})
+	// Atribuir um ID único
+	suspectIDLock.Lock()
+	suspectID++
+	req.ID = suspectID
+	suspectIDLock.Unlock()
 
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			enqueueUIUpdate(func() {
-				appendMessage(fmt.Sprintf("Erro ao aceitar conexão: %v\n", err))
-			})
-			continue
+	messagesLock.Lock()
+	messages = append(messages, req)
+	messagesLock.Unlock()
+
+	// Enviar para a fila de processamento
+	suspectChan <- req
+
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]int{"id": req.ID})
+}
+
+// handleListSuspects lista todas as suspeitas
+func handleListSuspects(w http.ResponseWriter, r *http.Request) {
+	messagesLock.Lock()
+	defer messagesLock.Unlock()
+	json.NewEncoder(w).Encode(messages)
+}
+
+// handleRespondSuspect permite que o operador responda a uma suspeita
+func handleRespondSuspect(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	var reqBody struct {
+		Response string `json:"response"` // "y" ou "n"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var idInt int
+	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil {
+		http.Error(w, "ID inválido", http.StatusBadRequest)
+		return
+	}
+
+	messagesLock.Lock()
+	defer messagesLock.Unlock()
+
+	// Achar no slice
+	var indexToRemove = -1
+	var foundMessage SuspectRequest
+	for i, m := range messages {
+		if m.ID == idInt {
+			indexToRemove = i
+			foundMessage = m
+			break
 		}
-		enqueueUIUpdate(func() {
-			appendMessage(fmt.Sprintf("Nova conexão de: %s\n", conn.RemoteAddr()))
-		})
+	}
 
-		// Trata cada conexão em uma goroutine separada
-		go handleConnection(conn)
+	if indexToRemove == -1 {
+		http.Error(w, "Mensagem não encontrada", http.StatusNotFound)
+		return
+	}
+
+	go logMessage(foundMessage, reqBody.Response)
+
+	pendingResponsesLock.Lock()
+	pendingResponses[foundMessage.ID] = reqBody.Response
+	pendingResponsesLock.Unlock()
+
+	messages = append(messages[:indexToRemove], messages[indexToRemove+1:]...)
+
+	// Resposta HTTP
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "mensagem removida com sucesso"})
+}
+
+// Função para logar a mensagem em um suspeito com data e horário
+func logMessage(msg SuspectRequest, response string) {
+	// Obter o horário atual formatado
+	currentTime := time.Now().Format("2006-01-02 15:04:05")
+
+	// Formatar a entrada de log incluindo data e horário
+	logEntry := fmt.Sprintf("ID=%d, Agent=%s, Message=%s, Response=%s, DateTime=%s\n",
+		msg.ID, msg.Agent, msg.Message, response, currentTime)
+
+	// Abrir/criar o arquivo de log em modo append e escrita
+	f, err := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Println("Erro ao abrir log:", err)
+		return
+	}
+	defer f.Close()
+
+	// Escrever a entrada de log no arquivo
+	if _, err = f.WriteString(logEntry); err != nil {
+		log.Println("Erro ao escrever no log:", err)
 	}
 }
 
-// handleConnection recebe as mensagens de um agente.
-func handleConnection(conn net.Conn) {
-	defer func() {
-		enqueueUIUpdate(func() {
-			appendMessage(fmt.Sprintf("Conexão encerrada com: %s\n", conn.RemoteAddr()))
-		})
-		conn.Close()
-	}()
+// handleGetResponses retorna as respostas para os IDs especificados
+func handleGetResponses(w http.ResponseWriter, r *http.Request) {
+	idsParam := r.URL.Query().Get("ids")
+	if idsParam == "" {
+		http.Error(w, "IDs são necessários", http.StatusBadRequest)
+		return
+	}
 
-	agentScanner := bufio.NewScanner(conn)
-	for agentScanner.Scan() {
-		line := agentScanner.Text()
-		enqueueUIUpdate(func() {
-			appendMessage(fmt.Sprintf("[AGENTE %s] Recebido: %s\n", conn.RemoteAddr(), line))
-		})
-
-		// Se for [SUSPEITO], colocamos na fila (suspectChan) com deduplicação
-		if strings.Contains(line, "[SUSPEITO]") {
-			enqueueUIUpdate(func() {
-				appendMessage("[SERVIDOR] Chegou um [SUSPEITO], adicionando à fila...\n")
-			})
-
-			// Cria a chave para deduplicação: "remoteAddr:message"
-			key := fmt.Sprintf("%s:%s", conn.RemoteAddr().String(), line)
-
-			// Verifica se a mensagem já está pendente
-			pendingMessagesLock.Lock()
-			if _, exists := pendingMessages[key]; exists {
-				// Mensagem duplicada, ignora enfileiramento
-				appendMessage(fmt.Sprintf("[SERVIDOR] Mensagem duplicada ignorada: %s\n", line))
-				pendingMessagesLock.Unlock()
-				continue
+	var decisions []Decision
+	var id int
+	for _, part := range split(idsParam, ",") {
+		if _, err := fmt.Sscanf(part, "%d", &id); err == nil {
+			pendingResponsesLock.Lock()
+			response, exists := pendingResponses[id]
+			if exists {
+				decisions = append(decisions, Decision{MessageID: id, Response: response})
+				// Remover a resposta após ser enviada
+				delete(pendingResponses, id)
 			}
+			pendingResponsesLock.Unlock()
+		}
+	}
 
-			// Marca a mensagem como pendente
-			pendingMessages[key] = true
-			pendingMessagesLock.Unlock()
+	json.NewEncoder(w).Encode(decisions)
+}
 
-			// Atribui um ID único à mensagem
-			suspectIDLock.Lock()
-			suspectID++
-			currentID := suspectID
-			suspectIDLock.Unlock()
-
-			// Envia para o canal
-			suspectChan <- suspectRequest{
-				id:      currentID,
-				conn:    conn,
-				message: line,
-			}
-
+// split divide uma string com base no separador
+func split(s, sep string) []string {
+	var result []string
+	current := ""
+	for _, c := range s {
+		if string(c) == sep {
+			result = append(result, current)
+			current = ""
 		} else {
-			// Mensagem sem necessidade de resposta
-			enqueueUIUpdate(func() {
-				appendMessage(fmt.Sprintf("[SERVIDOR] Mensagem normal: %s\n", line))
-			})
+			current += string(c)
 		}
 	}
-
-	if err := agentScanner.Err(); err != nil {
-		log.Println("Erro ao ler do agente:", err)
+	if current != "" {
+		result = append(result, current)
 	}
+	return result
 }
 
-// handleSuspects processa cada [SUSPEITO] da fila, aguardando resposta do operador.
+// handleSuspects processa suspeitas da fila
 func handleSuspects() {
 	for suspect := range suspectChan {
-		// Temos um novo [SUSPEITO] para responder
-		currentMsg := fmt.Sprintf("[SUSPEITO #%d] de %s: %s", suspect.id, suspect.conn.RemoteAddr(), suspect.message)
-
-		// Envia atualização para a UI definir a mensagem atual
-		enqueueUIUpdate(func() {
-			appendCurrentMessage(currentMsg)
-			sendButton.Enable()
-		})
-
-		// Cria um canal para sinalizar que a resposta foi enviada
-		done := make(chan struct{})
-
-		// Define a ação do botão "Enviar"
-		inputLock.Lock()
-		sendButton.OnTapped = func() {
-			response := strings.TrimSpace(strings.ToLower(input.Text))
-			if response == "y" || response == "n" {
-				// Envia a resposta ao agente
-				_, err := suspect.conn.Write([]byte(response + "\n"))
-				if err != nil {
-					enqueueUIUpdate(func() {
-						appendMessage(fmt.Sprintf("Erro ao enviar mensagem ao agente: %v\n", err))
-					})
-					return
-				}
-				enqueueUIUpdate(func() {
-					appendMessage(fmt.Sprintf("[SERVIDOR] Resposta '%s' enviada para [SUSPEITO #%d] de %s\n", response, suspect.id, suspect.conn.RemoteAddr()))
-					appendCurrentMessage("Nenhuma mensagem para responder no momento.")
-					input.SetText("")
-					sendButton.Disable()
-				})
-
-				// Remove a mensagem do mapa de pendentes
-				key := fmt.Sprintf("%s:%s", suspect.conn.RemoteAddr().String(), suspect.message)
-				pendingMessagesLock.Lock()
-				delete(pendingMessages, key)
-				pendingMessagesLock.Unlock()
-
-				// Sinaliza que terminamos de responder
-				close(done)
-			} else {
-				enqueueUIUpdate(func() {
-					appendMessage("Comando inválido, por favor responda y/n\n")
-				})
-			}
-		}
-		inputLock.Unlock()
-
-		// Aguarda a resposta ser enviada (bloqueia até o operador clicar corretamente)
-		<-done
+		// Processar a suspeita e aguardar a resposta do operador
+		fmt.Printf("Nova suspeita recebida: %+v\n", suspect)
 	}
 }
 
@@ -255,19 +219,4 @@ func handleUIUpdates() {
 	for updateFunc := range uiChan {
 		updateFunc()
 	}
-}
-
-// enqueueUIUpdate adiciona uma função ao canal de UI para ser executada na main goroutine.
-func enqueueUIUpdate(f func()) {
-	uiChan <- f
-}
-
-// appendMessage escreve novas linhas no label de mensagens.
-func appendMessage(text string) {
-	messages.SetText(messages.Text + text)
-}
-
-// appendCurrentMessage atualiza o label da mensagem atual
-func appendCurrentMessage(text string) {
-	currentMessage.SetText(text)
 }

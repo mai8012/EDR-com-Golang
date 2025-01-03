@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Servidor EDR</title>
+    <style>
+        /* Estilos Globais */
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background-color: #121212; /* Cor de fundo escura */
+            color: #e0e0e0; /* Cor de texto clara */
+        }
+
+        /* Estilo da Tabela */
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            background-color: #1e1e1e; /* Fundo da tabela */
+            color: #e0e0e0; /* Cor do texto na tabela */
+        }
+
+        th, td { 
+            border: 1px solid #333; /* Borda mais sutil */
+            padding: 12px; /* Aumento do padding para melhor legibilidade */
+            text-align: center; 
+        }
+
+        th { 
+            background-color: #333333; /* Fundo dos cabeçalhos */
+            color: #ffffff; /* Texto dos cabeçalhos */
+        }
+
+        /* Estilo dos Botões */
+        button { 
+            padding: 8px 16px; 
+            margin: 0 4px; 
+            cursor: pointer; 
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        /* Botões 'Y' e 'N' */
+        .btn-yes {
+            background-color: #4CAF50; /* Verde para 'Y' */
+            color: white;
+        }
+
+        .btn-no {
+            background-color: #f44336; /* Vermelho para 'N' */
+            color: white;
+        }
+
+        /* Botões Desabilitados */
+        button:disabled { 
+            background-color: #555; 
+            cursor: not-allowed; 
+            color: #ccc;
+        }
+
+        /* Status */
+        .status-y { 
+            color: #4CAF50; /* Verde para 'Y' */
+            font-weight: bold; 
+        }
+
+        .status-n { 
+            color: #f44336; /* Vermelho para 'N' */
+            font-weight: bold; 
+        }
+
+        /* Título */
+        h1 {
+            color: #ffffff; /* Título em branco */
+            text-align: center;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Processos Suspeitos</h1>
+    <table id="suspectsTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Máquina</th>
+                <th>Mensagem</th>
+                <th>Ação</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Linhas serão adicionadas dinamicamente -->
+        </tbody>
+    </table>
+
+    <script>
+        // Função para padronizar a resposta para minúsculas
+        function standardizeResponse(response) {
+            return response.toLowerCase();
+        }
+
+        async function fetchSuspects() {
+            try {
+                const response = await fetch('/api/suspects');
+                if (!response.ok) {
+                    throw new Error('Erro ao buscar suspeitos: ' + response.statusText);
+                }
+                const data = await response.json();
+                console.log('Dados recebidos:', data); // Log para depuração
+                const tbody = document.querySelector('#suspectsTable tbody');
+                tbody.innerHTML = '';
+                data.forEach(suspect => {
+                    const tr = document.createElement('tr');
+
+                    // ID
+                    const tdID = document.createElement('td');
+                    tdID.textContent = suspect.id;
+                    tr.appendChild(tdID);
+
+                    // Agente
+                    const tdAgent = document.createElement('td');
+                    tdAgent.textContent = suspect.agent;
+                    tr.appendChild(tdAgent);
+
+                    // Mensagem
+                    const tdMessage = document.createElement('td');
+                    tdMessage.textContent = suspect.message;
+                    tr.appendChild(tdMessage);
+
+                    // Ação (Botões)
+                    const tdAction = document.createElement('td');
+                    if (!suspect.response) { // Verifica se 'response' é null, undefined ou vazio
+                        const btnYes = document.createElement('button');
+                        btnYes.textContent = 'Y';
+                        btnYes.classList.add('btn-yes');
+                        btnYes.onclick = () => respondSuspect(suspect.id, 'y', tr);
+
+                        const btnNo = document.createElement('button');
+                        btnNo.textContent = 'N';
+                        btnNo.classList.add('btn-no');
+                        btnNo.onclick = () => respondSuspect(suspect.id, 'n', tr);
+
+                        tdAction.appendChild(btnYes);
+                        tdAction.appendChild(btnNo);
+                    } else {
+                        tdAction.textContent = '-';
+                    }
+                    tr.appendChild(tdAction);
+
+                    // Status
+                    const tdStatus = document.createElement('td');
+                    if (suspect.response) {
+                        const responseStandard = standardizeResponse(suspect.response);
+                        if (responseStandard === 'y') {
+                            tdStatus.textContent = 'Y';
+                            tdStatus.classList.add('status-y');
+                        } else if (responseStandard === 'n') {
+                            tdStatus.textContent = 'N';
+                            tdStatus.classList.add('status-n');
+                        } else {
+                            tdStatus.textContent = '-';
+                        }
+                    } else {
+                        tdStatus.textContent = '-';
+                    }
+                    tr.appendChild(tdStatus);
+
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Erro ao buscar suspeitos:', error);
+                alert('Não foi possível carregar os suspeitos. Verifique o console para mais detalhes.');
+            }
+        }
+
+        async function respondSuspect(id, response, tableRow) {
+            try {
+                console.log(`Enviando resposta para o suspeito ID ${id}: ${response}`); // Log para depuração
+                const res = await fetch(`/api/suspects/${id}/response`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ response })
+                });
+
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    throw new Error('Erro ao enviar resposta: ' + res.statusText + ' - ' + errorText);
+                }
+
+                // Opcional: verificar a resposta do backend
+                const resData = await res.json();
+                console.log('Resposta do servidor:', resData); // Log para depuração
+
+                // Atualizar a linha específica com o status
+                const tdAction = tableRow.children[3];
+                tdAction.innerHTML = '-';
+
+                const tdStatus = tableRow.children[4];
+                if (response === 'y') {
+                    tdStatus.textContent = 'Y';
+                    tdStatus.classList.remove('status-n');
+                    tdStatus.classList.add('status-y');
+                } else {
+                    tdStatus.textContent = 'N';
+                    tdStatus.classList.remove('status-y');
+                    tdStatus.classList.add('status-n');
+                }
+            } catch (error) {
+                console.error('Erro ao enviar resposta:', error);
+                alert('Não foi possível enviar a resposta. Verifique o console para mais detalhes.');
+            }
+        }
+
+        // Atualizar a tabela a cada 5 segundos
+        fetchSuspects();
+        setInterval(fetchSuspects, 5000);
+    </script>
+</body>
+</html>

@@ -1,27 +1,28 @@
 package main
 
 import (
-	"bufio"
-	"edr-agent/monitor"
-	"edr-agent/notifier"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"net"
+	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"edr-agent/monitor"
 
 	psutil "github.com/shirou/gopsutil/process"
 )
 
 const (
-	logFilePath    = "log.txt"
-	serverAddress  = "192.168.2.106:8080" // Altere para o endereço do seu servidor
+	serverURL      = "http://192.168.2.111:8080/api/suspects" // Altere para o endereço do seu servidor
 	processScanInt = 10 * time.Second
+	fetchInterval  = 15 * time.Second
+	retryInterval  = 10 * time.Second
 )
 
 var (
@@ -30,7 +31,7 @@ var (
 	messageIDToProcessLock sync.Mutex
 
 	// Fila para rastrear mensagens pendentes para deduplicação
-	pendingResponses     = make([]int, 0)
+	pendingResponses     = []int{}
 	pendingResponsesLock sync.Mutex
 
 	// Contador para IDs únicos
@@ -38,63 +39,22 @@ var (
 	suspectIDLock sync.Mutex
 )
 
-// SuspiciousProcess representa um processo suspeito detectado.
-type SuspiciousProcess struct {
-	Name string
-	Path string
-	PID  int
-	IPs  string
-	Host string
-}
-
 // Decision representa a resposta do servidor para uma suspeita.
 type Decision struct {
-	MessageID int
-	Response  string // "y" ou "n"
+	MessageID int    `json:"message_id"`
+	Response  string `json:"response"` // "y" ou "n"
 }
 
-// suspectWriter grava no log local e também envia mensagens ao servidor (se conectado).
-type suspectWriter struct {
-	file *os.File
-	conn net.Conn
-	mu   sync.Mutex
-}
-
-// Write grava no log local e envia ao servidor se a conexão estiver estabelecida.
-func (w *suspectWriter) Write(p []byte) (n int, err error) {
-	line := string(p)
-	if strings.Contains(line, "[SUSPEITO]") ||
-		strings.Contains(line, "[FINALIZADO]") ||
-		strings.Contains(line, "[LIBERADO]") {
-		if _, err := w.file.Write([]byte(line)); err != nil {
-			fmt.Println("Erro ao escrever em arquivo de log:", err)
-		}
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		if w.conn != nil {
-			if _, err := w.conn.Write([]byte(line)); err != nil {
-				fmt.Println("Erro ao enviar dados ao servidor:", err)
-			}
-		}
-	}
-	return len(p), nil
+// SuspiciousProcess representa um processo suspeito detectado.
+type SuspiciousProcess struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	PID  int    `json:"pid"`
+	IPs  string `json:"ips"`
+	Host string `json:"host"`
 }
 
 func main() {
-	// Abrir arquivo de log
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		fmt.Println("Erro ao criar/abrir arquivo de log:", err)
-		return
-	}
-	defer logFile.Close()
-
-	// Configurar log
-	sw := &suspectWriter{file: logFile}
-	mw := io.MultiWriter(os.Stdout, sw)
-	log.SetOutput(mw)
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-
 	log.Println("Iniciando agente EDR (Windows)...")
 
 	// Canais para comunicação
@@ -119,66 +79,11 @@ func main() {
 		handleDecisions(decisionsChan)
 	}()
 
-	// Goroutine para enviar email de log
+	// Goroutine para gerenciar comunicação HTTP
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for {
-			select {
-			case <-time.After(120 * time.Minute):
-				notifier.SendEmail(logFilePath)
-			case <-stopChan:
-				notifier.SendEmail(logFilePath)
-				return
-			}
-		}
-	}()
-
-	// Canal para detectar perda de conexão
-	connectionLost := make(chan struct{})
-
-	// Goroutine para gerenciar conexão e enviar/receber
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			// Estabelecer conexão com o servidor
-			conn, err := connectToServer(serverAddress)
-			if err != nil {
-				log.Fatalf("Falha ao conectar ao servidor: %v", err)
-			}
-
-			log.Println("Conectado ao servidor.")
-
-			// Iniciar goroutines para enviar suspeitas e receber decisões
-			var sendWg sync.WaitGroup
-			sendWg.Add(1)
-			go func() {
-				defer sendWg.Done()
-				sendSuspicions(conn, suspicionsChan)
-			}()
-			sendWg.Add(1)
-			go func() {
-				defer sendWg.Done()
-				receiveDecisions(conn, decisionsChan, connectionLost)
-			}()
-
-			// Aguarda sinal de perda de conexão
-			<-connectionLost
-
-			log.Println("Conexão perdida com o servidor.")
-
-			// Enviar "n" para mensagens pendentes
-			sendNForPendingMessages(decisionsChan)
-
-			// Fecha a conexão explicitamente
-			if err := conn.Close(); err != nil {
-				log.Printf("Erro ao fechar a conexão: %v", err)
-			}
-
-			log.Println("Tentando reconectar em 5 segundos...")
-			time.Sleep(5 * time.Second)
-		}
+		manageHTTPCommunication(serverURL, suspicionsChan, decisionsChan, stopChan)
 	}()
 
 	// Aguarda sinal de interrupção
@@ -192,95 +97,158 @@ func main() {
 	wg.Wait()
 }
 
-// connectToServer tenta estabelecer uma conexão TCP com o servidor.
-func connectToServer(address string) (net.Conn, error) {
-	for {
-		conn, err := net.Dial("tcp", address)
-		if err == nil {
-			fmt.Println("Conectado ao servidor TCP em", address)
-			return conn, nil
-		}
-		fmt.Println("Erro ao conectar ao servidor:", err)
-		fmt.Println("Tentando novamente em 5 segundos...")
-		time.Sleep(5 * time.Second)
+// manageHTTPCommunication gerencia o envio de suspeitas e a busca de decisões via HTTP
+func manageHTTPCommunication(serverURL string, suspicionsChan <-chan monitor.SuspiciousProcess, decisionsChan chan<- Decision, stopChan <-chan os.Signal) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
 	}
-}
 
-// sendSuspicions envia mensagens de processos suspeitos ao servidor.
-func sendSuspicions(conn net.Conn, suspicionsChan <-chan monitor.SuspiciousProcess) {
-	for suspect := range suspicionsChan {
-		// Gera um ID único para a mensagem
-		messageID := getNextMessageID()
+	ticker := time.NewTicker(fetchInterval)
+	defer ticker.Stop()
 
-		// Cria a mensagem no formato esperado pelo servidor
-		message := fmt.Sprintf("[SUSPEITO] ID:%d|Name:%s|Path:%s|PID:%d|IP:%s|Host:%s",
-			messageID, suspect.Name, suspect.Path, suspect.PID, suspect.IPs, suspect.Host)
-
-		// Envia a mensagem ao servidor com tentativa de reenvio em caso de falha
-		for {
-			_, err := fmt.Fprintln(conn, message)
+	for {
+		select {
+		case suspect, ok := <-suspicionsChan:
+			if !ok {
+				return
+			}
+			// Enviar suspeita ao servidor
+			messageID := getNextMessageID()
+			reqBody := map[string]interface{}{
+				"id":      messageID,
+				"message": formatSuspectMessage(suspect),
+				"agent":   getAgentIdentifier(),
+			}
+			jsonData, err := json.Marshal(reqBody)
 			if err != nil {
-				log.Printf("[ERRO] Falha ao enviar suspeito ao servidor: %v", err)
-				log.Println("Tentando enviar novamente...")
-				time.Sleep(5 * time.Minute)
+				log.Printf("Erro ao serializar JSON: %v", err)
+
 				continue
 			}
-			break
-		}
 
-		log.Printf("Mensagem enviada ao servidor: %s", message)
+			resp, err := client.Post(serverURL, "application/json", bytes.NewBuffer(jsonData))
+			if err != nil {
+				log.Printf("Erro ao enviar suspeita: %v", err)
 
-		// Mapeia o ID para o processo suspeito
-		messageIDToProcessLock.Lock()
-		messageIDToProcess[messageID] = monitor.SuspiciousProcess{
-			Name: suspect.Name,
-			Path: suspect.Path,
-			PID:  suspect.PID,
-			IPs:  suspect.IPs,
-			Host: suspect.Host,
-		}
-		messageIDToProcessLock.Unlock()
+				continue
+			}
 
-		// Adiciona o messageID à fila de pendentes
-		pendingResponsesLock.Lock()
-		pendingResponses = append(pendingResponses, messageID)
-		pendingResponsesLock.Unlock()
-	}
-}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
 
-// receiveDecisions lê mensagens do servidor e envia para decisionsChan.
-func receiveDecisions(conn net.Conn, decisionsChan chan<- Decision, connectionLost chan<- struct{}) {
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		line := scanner.Text()
-		lowerMsg := strings.ToLower(strings.TrimSpace(line))
+			if resp.StatusCode != http.StatusAccepted {
+				log.Printf("Servidor retornou status %d: %s", resp.StatusCode, string(body))
 
-		if lowerMsg == "y" || lowerMsg == "n" {
-			var decision Decision
+				continue
+			}
+
+			var respData map[string]int
+			if err := json.Unmarshal(body, &respData); err != nil {
+				log.Printf("Erro ao decodificar resposta: %v", err)
+
+				continue
+			}
+
+			receivedID, exists := respData["id"]
+			if !exists {
+				log.Printf("Resposta inválida do servidor: %s", string(body))
+
+				continue
+			}
+
+			// Se chegou até aqui, deu tudo certo.
+			messageIDToProcessLock.Lock()
+			messageIDToProcess[receivedID] = suspect
+			messageIDToProcessLock.Unlock()
 
 			pendingResponsesLock.Lock()
-			if len(pendingResponses) == 0 {
-				log.Printf("[AVISO] Recebeu resposta '%s' sem mensagens pendentes.", lowerMsg)
-				pendingResponsesLock.Unlock()
-				continue
-			}
-			// Obtém o primeiro messageID da fila
-			decision.MessageID = pendingResponses[0]
-			// Remove o primeiro elemento da fila
-			pendingResponses = pendingResponses[1:]
+			pendingResponses = append(pendingResponses, receivedID)
 			pendingResponsesLock.Unlock()
 
-			decision.Response = lowerMsg
-			decisionsChan <- decision
-		} else {
-			log.Printf("[AVISO] Formato de resposta desconhecido: %s", line)
+			log.Printf("Suspeita enviada com ID %d", receivedID)
+
+		case <-ticker.C:
+			// Buscar respostas do servidor
+			fetchResponses(client, serverURL, decisionsChan)
+
+		case <-stopChan:
+
+			return
 		}
 	}
+}
 
-	if err := scanner.Err(); err != nil {
-		log.Printf("[ERRO] Erro ao ler do servidor: %v", err)
-		// Enviar sinal de perda de conexão
-		connectionLost <- struct{}{}
+// fetchResponses busca respostas do servidor para as suspeitas pendentes
+func fetchResponses(client *http.Client, serverURL string, decisionsChan chan<- Decision) {
+	pendingResponsesLock.Lock()
+	if len(pendingResponses) == 0 {
+		pendingResponsesLock.Unlock()
+		return
+	}
+
+	// Monta a query de IDs pendentes
+	ids := ""
+	for i, id := range pendingResponses {
+		if i > 0 {
+			ids += ","
+		}
+		ids += fmt.Sprintf("%d", id)
+	}
+	pendingResponsesLock.Unlock()
+
+	reqURL := fmt.Sprintf("%s/responses?ids=%s", serverURL, ids)
+	resp, err := client.Get(reqURL)
+	if err != nil {
+		log.Printf("Erro ao buscar respostas: %v", err)
+		// Caso ocorra erro na busca, enviar "n" para todos IDs pendentes
+		pendingResponsesLock.Lock()
+		for _, id := range pendingResponses {
+			decisionsChan <- Decision{MessageID: id, Response: "n"}
+		}
+		pendingResponses = nil
+		pendingResponsesLock.Unlock()
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Erro ao buscar respostas, status: %d", resp.StatusCode)
+		// Em caso de status != 200, também enviar "n" para todos IDs pendentes
+		pendingResponsesLock.Lock()
+		for _, id := range pendingResponses {
+			decisionsChan <- Decision{MessageID: id, Response: "n"}
+		}
+		pendingResponses = nil
+		pendingResponsesLock.Unlock()
+		return
+	}
+
+	var decisions []Decision
+	if err := json.NewDecoder(resp.Body).Decode(&decisions); err != nil {
+		log.Printf("Erro ao decodificar respostas: %v", err)
+		// Se falhar o decode, novamente "n" para todos IDs pendentes
+		pendingResponsesLock.Lock()
+		for _, id := range pendingResponses {
+			decisionsChan <- Decision{MessageID: id, Response: "n"}
+		}
+		pendingResponses = nil
+		pendingResponsesLock.Unlock()
+		return
+	}
+
+	// Se chegou até aqui, temos respostas válidas do servidor
+	for _, decision := range decisions {
+		decisionsChan <- decision
+
+		// Remove o ID da lista de pendentes
+		pendingResponsesLock.Lock()
+		for i, id := range pendingResponses {
+			if id == decision.MessageID {
+				pendingResponses = append(pendingResponses[:i], pendingResponses[i+1:]...)
+				break
+			}
+		}
+		pendingResponsesLock.Unlock()
 	}
 }
 
@@ -298,17 +266,16 @@ func handleDecisions(decisionsChan <-chan Decision) {
 		delete(messageIDToProcess, decision.MessageID)
 		messageIDToProcessLock.Unlock()
 
-		// Não há necessidade de deduplicar, pois a fila já garante a ordem
-
+		// Executa a ação baseada na resposta
 		if decision.Response == "y" {
 			// Resposta 'y': Retoma o processo
-			err := monitor.ResumeProcess(suspect.PID) // Retoma o processo
+			err := monitor.ResumeProcess(suspect.PID)
 			if err != nil {
 				log.Printf("[ERRO] ao retomar processo PID %d: %v", suspect.PID, err)
 			} else {
 				log.Printf("[LIBERADO] Processo %s (PID=%d) retomado com sucesso.\n", suspect.Path, suspect.PID)
 			}
-		} else {
+		} else if decision.Response == "n" {
 			// Resposta 'n': Finaliza o processo
 			p, err := psutil.NewProcess(int32(suspect.PID))
 			if err != nil {
@@ -332,20 +299,17 @@ func getNextMessageID() int {
 	return suspectID
 }
 
-// sendNForPendingMessages envia "n" para todas as mensagens pendentes.
-func sendNForPendingMessages(decisionsChan chan<- Decision) {
-	pendingResponsesLock.Lock()
-	defer pendingResponsesLock.Unlock()
+// formatSuspectMessage formata a mensagem suspeita no formato esperado pelo servidor
+func formatSuspectMessage(suspect monitor.SuspiciousProcess) string {
+	return fmt.Sprintf("[SUSPEITO] Name:%s|Path:%s|PID:%d|IP:%s|Host:%s",
+		suspect.Name, suspect.Path, suspect.PID, suspect.IPs, suspect.Host)
+}
 
-	for _, messageID := range pendingResponses {
-		decision := Decision{
-			MessageID: messageID,
-			Response:  "n",
-		}
-		decisionsChan <- decision
-		log.Printf("[AUTO-RESPOSTA] Enviando 'n' para ID %d devido à perda de conexão.", messageID)
+// getAgentIdentifier retorna uma identificação única para o agente
+func getAgentIdentifier() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "UnknownAgent"
 	}
-
-	// Limpar a fila de pendentes
-	pendingResponses = pendingResponses[:0]
+	return hostname
 }

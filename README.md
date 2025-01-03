@@ -12,7 +12,7 @@ Gestão de Processos Suspeitos:
 
 ![image](https://github.com/user-attachments/assets/5d9627b4-3c2d-483b-8216-63a3cc24e9c3)
 
-
+Atenção no lado do servidor é criado um arquivo log.txt onde fica salvo as respostas enviada para o agente.
 Suspensão de Processos: Quando um processo suspeito é identificado, o agente suspende sua execução temporariamente utilizando chamadas de sistema específicas do Windows (NtSuspendProcess).
 Registro de Suspeitas: Detalhes do processo suspeito, incluindo nome, caminho, PID, endereços IP e hostname, são registrados localmente em um arquivo de log (log.txt) e enviados para um servidor central para avaliação.
 

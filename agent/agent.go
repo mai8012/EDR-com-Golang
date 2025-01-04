@@ -8,21 +8,31 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"os/user"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"edr-agent/monitor"
 
+	"golang.org/x/term"
+
+	"github.com/google/uuid"
 	psutil "github.com/shirou/gopsutil/process"
 )
 
 const (
-	serverURL      = "http://192.168.2.111:8080/api/suspects" // Altere para o endereço do seu servidor
+	// Endpoints e Intervalos
+	serverURL      = "http://192.168.2.105:8080/api/suspects" // Altere para o endereço do seu servidor
 	processScanInt = 10 * time.Second
 	fetchInterval  = 15 * time.Second
 	retryInterval  = 10 * time.Second
+	pingInterval   = 30 * time.Second
+	pingURL        = "http://192.168.2.105:8080/api/ping" // Altere conforme necessário
 )
 
 var (
@@ -57,6 +67,17 @@ type SuspiciousProcess struct {
 func main() {
 	log.Println("Iniciando agente EDR (Windows)...")
 
+	//addScheduledTask cria tarefa agendada para iniciar junto com o sistema com todos os usuarios
+	//vai pedir senha do usuario admin que deu start no agente
+	//depois de criada a tarefa temos uma verificação para ver se a tarefa esta criada
+	//então uma vez configurado não vai pedir novamente
+	//e todo usuario que logar na maquina mesmo não sendo admin o agent vai startar com privilegios
+	addScheduledTask()
+
+	// Identificador único do agente
+	agentID := getAgentIdentifier()
+	log.Printf("Identificador do Agente: %s", agentID)
+
 	// Canais para comunicação
 	suspicionsChan := make(chan monitor.SuspiciousProcess, 1000)
 	decisionsChan := make(chan Decision, 1000)
@@ -84,6 +105,13 @@ func main() {
 	go func() {
 		defer wg.Done()
 		manageHTTPCommunication(serverURL, suspicionsChan, decisionsChan, stopChan)
+	}()
+
+	// Goroutine para enviar pings
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sendPings(agentID, stopChan)
 	}()
 
 	// Aguarda sinal de interrupção
@@ -122,14 +150,12 @@ func manageHTTPCommunication(serverURL string, suspicionsChan <-chan monitor.Sus
 			jsonData, err := json.Marshal(reqBody)
 			if err != nil {
 				log.Printf("Erro ao serializar JSON: %v", err)
-
 				continue
 			}
 
 			resp, err := client.Post(serverURL, "application/json", bytes.NewBuffer(jsonData))
 			if err != nil {
 				log.Printf("Erro ao enviar suspeita: %v", err)
-
 				continue
 			}
 
@@ -138,21 +164,18 @@ func manageHTTPCommunication(serverURL string, suspicionsChan <-chan monitor.Sus
 
 			if resp.StatusCode != http.StatusAccepted {
 				log.Printf("Servidor retornou status %d: %s", resp.StatusCode, string(body))
-
 				continue
 			}
 
 			var respData map[string]int
 			if err := json.Unmarshal(body, &respData); err != nil {
 				log.Printf("Erro ao decodificar resposta: %v", err)
-
 				continue
 			}
 
 			receivedID, exists := respData["id"]
 			if !exists {
 				log.Printf("Resposta inválida do servidor: %s", string(body))
-
 				continue
 			}
 
@@ -172,7 +195,6 @@ func manageHTTPCommunication(serverURL string, suspicionsChan <-chan monitor.Sus
 			fetchResponses(client, serverURL, decisionsChan)
 
 		case <-stopChan:
-
 			return
 		}
 	}
@@ -291,6 +313,53 @@ func handleDecisions(decisionsChan <-chan Decision) {
 	}
 }
 
+// sendPings envia pings periódicos para o servidor para indicar que o agente está online
+func sendPings(agentID string, stopChan <-chan os.Signal) {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Preparar o payload do ping
+			payload := map[string]string{
+				"id": agentID,
+			}
+			jsonData, err := json.Marshal(payload)
+			if err != nil {
+				log.Printf("Erro ao serializar JSON para ping: %v", err)
+				continue
+			}
+
+			// Enviar o ping
+			resp, err := client.Post(pingURL, "application/json", bytes.NewBuffer(jsonData))
+			if err != nil {
+				log.Printf("Erro ao enviar ping: %v", err)
+				continue
+			}
+
+			// Ler e descartar o corpo da resposta
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				log.Printf("Servidor retornou status %d para ping", resp.StatusCode)
+				continue
+			}
+
+			log.Println("Ping enviado com sucesso")
+
+		case <-stopChan:
+			log.Println("Encerrando envio de pings")
+			return
+		}
+	}
+}
+
 // getNextMessageID gera um ID único para cada mensagem enviada.
 func getNextMessageID() int {
 	suspectIDLock.Lock()
@@ -309,7 +378,101 @@ func formatSuspectMessage(suspect monitor.SuspiciousProcess) string {
 func getAgentIdentifier() string {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return "UnknownAgent"
+		log.Println("Erro ao obter hostname, gerando UUID")
+		return uuid.New().String()
 	}
 	return hostname
+}
+
+func addScheduledTask() {
+	taskName := "SystemEDR" // Nome da tarefa agendada
+
+	// 1. Verificar se a tarefa já existe
+	if isTaskExists(taskName) {
+		fmt.Println("A tarefa agendada já existe.")
+		return
+	}
+
+	// 2. Obter o caminho absoluto do executável
+	exePath, err := os.Executable()
+	if err != nil {
+		fmt.Println("Erro ao obter o caminho do executável:", err)
+		return
+	}
+
+	exePath, err = filepath.Abs(exePath)
+	if err != nil {
+		fmt.Println("Erro ao obter o caminho absoluto do executável:", err)
+		return
+	}
+
+	// Envolver o caminho do executável em aspas para lidar com espaços no caminho
+	exePathQuoted := fmt.Sprintf("\"%s\"", exePath)
+
+	// 3. Obter o nome de usuário atual
+	currentUser, err := user.Current()
+	if err != nil {
+		fmt.Println("Erro ao obter o usuário atual:", err)
+		return
+	}
+
+	username := currentUser.Username
+	// No Windows, o formato pode ser DOMAIN\Username ou Username
+	// Para garantir compatibilidade, podemos processar o nome de usuário
+	if strings.Contains(username, "\\") {
+		parts := strings.Split(username, "\\")
+		username = parts[len(parts)-1]
+	}
+
+	// 4. Solicitar a senha do usuário
+	fmt.Printf("Por favor, insira a senha para a conta administrador '%s': ", username)
+	passwordBytes, err := readPassword()
+	if err != nil {
+		fmt.Println("\nErro ao ler a senha:", err)
+		return
+	}
+	password := string(passwordBytes)
+
+	cmd := exec.Command("schtasks",
+		"/Create",
+		"/SC", "ONSTART",
+		"/RL", "HIGHEST",
+		"/F",
+		"/TN", taskName,
+		"/TR", exePathQuoted,
+		"/RU", username,
+		"/RP", password,
+	)
+
+	// 6. Executar o comando
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Erro ao criar a tarefa agendada: %v\nSaída: %s\n", err, string(output))
+		return
+	}
+
+	fmt.Printf("Tarefa agendada '%s' criada com sucesso.\n", taskName)
+}
+
+// isTaskExists verifica se uma tarefa agendada com o nome especificado já existe.
+func isTaskExists(taskName string) bool {
+	cmd := exec.Command("schtasks", "/Query", "/TN", taskName)
+	err := cmd.Run()
+	return err == nil
+}
+
+// readPassword lê a senha do usuário sem ecoar no terminal (apenas para sistemas compatíveis)
+func readPassword() ([]byte, error) {
+	return readPasswordFromStdin()
+}
+
+func readPasswordFromStdin() ([]byte, error) {
+	return termReadPassword(int(os.Stdin.Fd()))
+}
+
+// termReadPassword lê a senha usando a biblioteca term
+func termReadPassword(fd int) ([]byte, error) {
+	fmt.Println()
+	password, err := term.ReadPassword(fd)
+	return password, err
 }

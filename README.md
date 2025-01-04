@@ -33,7 +33,8 @@ Registro de Suspeitas: Detalhes do processo suspeito, incluindo nome, caminho, P
 
 Atenção:ao iniciar o agent pela primeira vez:
 
-![image](https://github.com/user-attachments/assets/4e6cac7a-e49c-4b06-bbe7-af6795b504e2)
+![image](https://github.com/user-attachments/assets/4e13e16d-ba3d-4806-bb7d-fc8d9a8bd0f0)
+
 
 
 Comunicação com o Servidor:

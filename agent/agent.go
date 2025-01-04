@@ -19,20 +19,20 @@ import (
 
 	"edr-agent/monitor"
 
-	"golang.org/x/term"
+	"golang.org/x/term" //Manipulação avançada de terminais, útil para interações seguras com o usuário.
 
-	"github.com/google/uuid"
-	psutil "github.com/shirou/gopsutil/process"
+	"github.com/google/uuid"                    //Geração e manipulação de identificadores únicos para o Agente.
+	psutil "github.com/shirou/gopsutil/process" //Obtenção e manipulação de informações sobre processos em execução no sistema.
 )
 
 const (
 	// Endpoints e Intervalos
 	serverURL      = "http://192.168.2.105:8080/api/suspects" // Altere para o endereço do seu servidor
-	processScanInt = 10 * time.Second
-	fetchInterval  = 15 * time.Second
-	retryInterval  = 10 * time.Second
-	pingInterval   = 30 * time.Second
-	pingURL        = "http://192.168.2.105:8080/api/ping" // Altere conforme necessário
+	pingURL        = "http://192.168.2.105:8080/api/ping"     // Altere conforme necessário
+	processScanInt = 10 * time.Second                         //"edr-agent/monitor"
+	fetchInterval  = 15 * time.Second                         //Gerencia o envio de suspeitas e a busca de decisões via HTTP
+	pingInterval   = 30 * time.Second                         //Envia pings periódicos para o servidor para indicar que o agente está online.
+
 )
 
 var (

@@ -68,7 +68,7 @@ func main() {
 	log.Println("Iniciando agente EDR (Windows)...")
 
 	//addScheduledTask cria tarefa agendada para iniciar junto com o sistema com todos os usuarios
-	//vai pedir senha do usuario admin que deu start no agente
+	//vai pedir senha do usuario admin que executou o agente
 	//depois de criada a tarefa temos uma verificação para ver se a tarefa esta criada
 	//então uma vez configurado não vai pedir novamente
 	//e todo usuario que logar na maquina mesmo não sendo admin o agent vai startar com privilegios

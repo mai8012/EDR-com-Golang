@@ -13,7 +13,7 @@ Gestão de Processos Suspeitos:
 ![image](https://github.com/user-attachments/assets/974df320-2ffa-4cd8-a966-e66d27177714)
 
 
-Atenção no lado do servidor é criado um arquivo log.txt onde fica salvo as respostas enviada para o agente.
+
 
 Suspensão de Processos: Quando um processo suspeito é identificado, o agente suspende sua execução temporariamente utilizando chamadas de sistema específicas do Windows (NtSuspendProcess).
 Registro de Suspeitas: Detalhes do processo suspeito, incluindo nome, caminho, PID, endereços IP e hostname, são registrados localmente em um arquivo de log (log.txt) e enviados para um servidor central para avaliação.
@@ -24,7 +24,14 @@ Registro de Suspeitas: Detalhes do processo suspeito, incluindo nome, caminho, P
 
 
 
+Atenção:ao iniciar o agent pela primeira vez:
+
+![image](https://github.com/user-attachments/assets/4e6cac7a-e49c-4b06-bbe7-af6795b504e2)
+
+
 Comunicação com o Servidor:
+
+Atenção no lado do servidor é criado um arquivo log.txt onde fica salvo as respostas enviada para o agente.
 
 Mapeamento de Mensagens: Mantém um mapeamento de IDs de mensagens para processos suspeitos, garantindo que cada decisão recebida corresponda ao processo correto.
 Tratamento de Respostas Automáticas: Em caso de perda de conexão com o servidor, o agente envia automaticamente a resposta "n" para todos os processos pendentes, finalizando-os.

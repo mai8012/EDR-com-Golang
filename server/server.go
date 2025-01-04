@@ -23,7 +23,14 @@ type Decision struct {
 	Response  string `json:"response"`
 }
 
+type Agent struct {
+	ID       string
+	LastPing time.Time
+}
+
 var (
+	agents               = make(map[string]time.Time)
+	agentsLock           sync.Mutex
 	suspectChan          = make(chan SuspectRequest, 1000)
 	uiChan               = make(chan func(), 1000)
 	messages             = []SuspectRequest{}
@@ -43,6 +50,11 @@ func main() {
 	r.HandleFunc("/api/suspects", handleListSuspects).Methods("GET")
 	r.HandleFunc("/api/suspects/responses", handleGetResponses).Methods("GET")
 
+	// Novos endpoints para monitoramento de agentes
+	r.HandleFunc("/api/ping", handlePing).Methods("POST")
+	r.HandleFunc("/api/online_count", handleOnlineCount).Methods("GET")
+	r.HandleFunc("/api/online_agents", handleOnlineAgents).Methods("GET")
+
 	// Servir arquivos estáticos e a interface web
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/")))
 
@@ -52,8 +64,63 @@ func main() {
 	// Iniciar o consumidor da UI
 	go handleUIUpdates()
 
+	go cleanupAgents() // Iniciar a rotina de limpeza de agentes
+
 	fmt.Println("Servidor HTTP iniciado na porta 8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
+}
+
+func handleOnlineAgents(w http.ResponseWriter, r *http.Request) {
+	agentsLock.Lock()
+	defer agentsLock.Unlock()
+
+	// Extrair apenas as chaves do map
+	var agentIDs []string
+	for agentID := range agents {
+		agentIDs = append(agentIDs, agentID)
+	}
+
+	// Retornar em JSON
+	json.NewEncoder(w).Encode(agentIDs)
+}
+
+func cleanupAgents() {
+	for {
+		time.Sleep(10 * time.Second) // Intervalo de verificação
+
+		cutoff := time.Now().Add(-30 * time.Second)
+		agentsLock.Lock()
+		for id, lastPing := range agents {
+			if lastPing.Before(cutoff) {
+				delete(agents, id)
+			}
+		}
+		agentsLock.Unlock()
+	}
+}
+
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	agentsLock.Lock()
+	agents[req.ID] = time.Now()
+	agentsLock.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleOnlineCount(w http.ResponseWriter, r *http.Request) {
+	agentsLock.Lock()
+	count := len(agents)
+	agentsLock.Unlock()
+
+	json.NewEncoder(w).Encode(map[string]int{"online": count})
 }
 
 // handleReceiveSuspect recebe suspeitas dos agentes via POST

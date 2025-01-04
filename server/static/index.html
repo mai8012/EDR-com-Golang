@@ -76,10 +76,28 @@
             text-align: center;
             margin-bottom: 20px;
         }
+
+        p {
+            font-size: 1.2em;
+            margin-bottom: 20px;
+        }
+
+        #onlineCount {
+            font-weight: bold;
+            color: #4CAF50; /* Verde para indicar status online */
+        }
     </style>
 </head>
 <body>
     <h1>Processos Suspeitos</h1>
+    <!-- Aqui adicionamos o botão "Visualizar" ao lado -->
+    <p>
+        Máquinas Online Monitoradas: <span id="onlineCount">0</span>
+        <button id="viewMachinesBtn">Visualizar</button>
+    </p>
+    <!-- E essa div abaixo para exibir a lista -->
+    <div id="machineList" style="margin-bottom: 20px;"></div>
+
     <table id="suspectsTable">
         <thead>
             <tr>
@@ -101,6 +119,9 @@
             return response.toLowerCase();
         }
 
+        // -------------------------------------
+        // BUSCAR LISTA DE SUSPEITOS
+        // -------------------------------------
         async function fetchSuspects() {
             try {
                 const response = await fetch('/api/suspects');
@@ -109,8 +130,10 @@
                 }
                 const data = await response.json();
                 console.log('Dados recebidos:', data); // Log para depuração
+
                 const tbody = document.querySelector('#suspectsTable tbody');
                 tbody.innerHTML = '';
+
                 data.forEach(suspect => {
                     const tr = document.createElement('tr');
 
@@ -131,7 +154,7 @@
 
                     // Ação (Botões)
                     const tdAction = document.createElement('td');
-                    if (!suspect.response) { // Verifica se 'response' é null, undefined ou vazio
+                    if (!suspect.response) { 
                         const btnYes = document.createElement('button');
                         btnYes.textContent = 'Y';
                         btnYes.classList.add('btn-yes');
@@ -175,9 +198,12 @@
             }
         }
 
+        // -------------------------------------
+        // ENVIAR RESPOSTA DO OPERADOR
+        // -------------------------------------
         async function respondSuspect(id, response, tableRow) {
             try {
-                console.log(`Enviando resposta para o suspeito ID ${id}: ${response}`); // Log para depuração
+                console.log(`Enviando resposta para o suspeito ID ${id}: ${response}`);
                 const res = await fetch(`/api/suspects/${id}/response`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -189,9 +215,8 @@
                     throw new Error('Erro ao enviar resposta: ' + res.statusText + ' - ' + errorText);
                 }
 
-                // Opcional: verificar a resposta do backend
                 const resData = await res.json();
-                console.log('Resposta do servidor:', resData); // Log para depuração
+                console.log('Resposta do servidor:', resData);
 
                 // Atualizar a linha específica com o status
                 const tdAction = tableRow.children[3];
@@ -213,9 +238,75 @@
             }
         }
 
-        // Atualizar a tabela a cada 5 segundos
+        // -------------------------------------
+        // BUSCAR CONTAGEM DE MÁQUINAS ONLINE
+        // -------------------------------------
+        async function fetchOnlineCount() {
+            try {
+                const response = await fetch('/api/online_count');
+                if (!response.ok) {
+                    throw new Error('Erro ao buscar contagem de máquinas online: ' + response.statusText);
+                }
+                const data = await response.json();
+                document.getElementById('onlineCount').textContent = data.online;
+            } catch (error) {
+                console.error('Erro ao buscar contagem de máquinas online:', error);
+            }
+        }
+
+        // -------------------------------------
+        // BUSCAR LISTA DE MÁQUINAS ONLINE
+        // -------------------------------------
+        async function fetchOnlineAgents() {
+            try {
+                const response = await fetch('/api/online_agents');
+                if (!response.ok) {
+                    throw new Error('Erro ao buscar lista de máquinas: ' + response.statusText);
+                }
+                const data = await response.json(); // array de strings (IDs)
+
+                const machineListDiv = document.getElementById('machineList');
+                machineListDiv.innerHTML = '';
+
+                if (data.length === 0) {
+                    machineListDiv.textContent = 'Nenhuma máquina online no momento.';
+                    return;
+                }
+
+                data.forEach(agentID => {
+                    const p = document.createElement('p');
+                    p.textContent = '- ' + agentID;
+                    machineListDiv.appendChild(p);
+                });
+            } catch (error) {
+                console.error('Erro ao buscar agentes online:', error);
+            }
+        }
+
+        // -------------------------------------
+        // TOGGLE: Mostra/oculta a lista de máquinas
+        // -------------------------------------
+        function toggleOnlineAgents() {
+            const machineListDiv = document.getElementById('machineList');
+
+            // Se a div estiver vazia (ou só espaços), buscamos e mostramos.
+            if (machineListDiv.innerHTML.trim() === '') {
+                fetchOnlineAgents(); 
+            } else {
+                // Se já estiver preenchida, limpamos para ocultar.
+                machineListDiv.innerHTML = '';
+            }
+        }
+
         fetchSuspects();
+        fetchOnlineCount();
+
+        // Atualizar periodicamente
         setInterval(fetchSuspects, 5000);
+        setInterval(fetchOnlineCount, 5000);
+
+        // Botão "Visualizar"
+        document.getElementById('viewMachinesBtn').addEventListener('click', toggleOnlineAgents);
     </script>
 </body>
 </html>

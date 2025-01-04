@@ -10,7 +10,8 @@ Ignorar Processos Legítimos: Processos localizados em diretórios ignorados (co
 Gestão de Processos Suspeitos:
 
 
-![image](https://github.com/user-attachments/assets/5d9627b4-3c2d-483b-8216-63a3cc24e9c3)
+![image](https://github.com/user-attachments/assets/974df320-2ffa-4cd8-a966-e66d27177714)
+
 
 Atenção no lado do servidor é criado um arquivo log.txt onde fica salvo as respostas enviada para o agente.
 

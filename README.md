@@ -4,6 +4,8 @@ para melhor entendimento das funcionalidade veja o video abaixo:
 
 
 https://youtu.be/Xh8kaPkSJeQ
+![image](https://github.com/user-attachments/assets/35e8e0a2-a4fa-472e-a88d-6a5cbac5cf0a)
+
 
 
 Monitoramento de Processos:

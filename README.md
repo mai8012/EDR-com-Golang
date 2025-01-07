@@ -42,8 +42,7 @@ Atenção:ao iniciar o agent pela primeira vez:
 
 Comunicação com o Servidor:
 
-Atenção no lado do servidor é criado um arquivo log.JSON onde fica salvo as respostas enviada para o agente.Para visualizar as respostas enviadas temos um botão
-na pagina HTML onde consegumos visualizar direto no navegador o log se quiser.
+Atenção no lado do servidor é criado um arquivo log.json onde fica salvo as respostas enviada para o agente.
 
 
 ![image](https://github.com/user-attachments/assets/17279229-e08c-49a7-8f71-72ff6757ec72)

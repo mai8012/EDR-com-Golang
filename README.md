@@ -19,7 +19,8 @@ Ignorar Processos Legítimos: Processos localizados em diretórios ignorados (co
 Gestão de Processos Suspeitos:
 
 
-![image](https://github.com/user-attachments/assets/974df320-2ffa-4cd8-a966-e66d27177714)
+![image](https://github.com/user-attachments/assets/868c020f-df83-41a1-ad34-6d54b318d877)
+
 
 
 

@@ -10,9 +10,11 @@ https://youtu.be/Xh8kaPkSJeQ
 Monitoramento de Processos:
 
 Escaneamento Contínuo: O agente escaneia os processos em execução no sistema.
-Critérios de Suspeita:
+
 Diretórios Monitorados: Detecta processos executados a partir de diretórios específicos considerados suspeitos.
+
 Nomes de Processos Suspeitos: Identifica processos com nomes que indicam potencial atividade maliciosa, como powershell, cmd.exe, wscript, entre outros.
+
 Ignorar Processos Legítimos: Processos localizados em diretórios ignorados (como C:\Windows\, C:\Program Files\, etc.) ou que estão na lista de processos permitidos são excluídos da análise.
 Gestão de Processos Suspeitos:
 

@@ -45,6 +45,13 @@ Comunicação com o Servidor:
 Atenção no lado do servidor é criado um arquivo log.JSON onde fica salvo as respostas enviada para o agente.Para visualizar as respostas enviadas temos um botão
 na pagina HTML onde consegumos visualizar direto no navegador o log se quiser.
 
+
+![image](https://github.com/user-attachments/assets/17279229-e08c-49a7-8f71-72ff6757ec72)
+
+
+
+
+
 Mapeamento de Mensagens: Mantém um mapeamento de IDs de mensagens para processos suspeitos, garantindo que cada decisão recebida corresponda ao processo correto.
 
 Tratamento de Respostas Automáticas: Em caso de perda de conexão com o servidor, o agente envia automaticamente a resposta "n" para todos os processos pendentes, finalizando-os.

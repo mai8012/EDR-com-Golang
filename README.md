@@ -41,13 +41,17 @@ Atenção:ao iniciar o agent pela primeira vez:
 
 Comunicação com o Servidor:
 
-Atenção no lado do servidor é criado um arquivo log.txt onde fica salvo as respostas enviada para o agente.
+Atenção no lado do servidor é criado um arquivo log.JSON onde fica salvo as respostas enviada para o agente.Para visualizar as respostas enviadas temos um botão
+na pagina HTML onde consegumos visualizar direto no navegador o log se quiser.
 
 Mapeamento de Mensagens: Mantém um mapeamento de IDs de mensagens para processos suspeitos, garantindo que cada decisão recebida corresponda ao processo correto.
+
 Tratamento de Respostas Automáticas: Em caso de perda de conexão com o servidor, o agente envia automaticamente a resposta "n" para todos os processos pendentes, finalizando-os.
 
 Detecção de Perda de Conexão: Monitora a conexão com o servidor e detecta qualquer perda de conexão.
+
 Reconexão Automática: Tenta reconectar automaticamente ao servidor em caso de falha na conexão.
+
 Gestão de Mensagens Pendentes: Assegura que todas as mensagens pendentes sejam tratadas adequadamente em caso de desconexão.
 
 

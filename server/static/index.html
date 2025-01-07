@@ -4,309 +4,202 @@
     <meta charset="UTF-8">
     <title>Servidor EDR</title>
     <style>
-        /* Estilos Globais */
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            background-color: #121212; /* Cor de fundo escura */
-            color: #e0e0e0; /* Cor de texto clara */
+        :root {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --table-bg: #1e1e1e;
+            --border-color: #333;
+            --header-bg: #333333;
+            --header-text: #ffffff;
+            --green: #4CAF50;
+            --red: #f44336;
+            --disabled-bg: #555;
+            --disabled-text: #ccc;
         }
 
-        /* Estilo da Tabela */
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            background-color: #1e1e1e; /* Fundo da tabela */
-            color: #e0e0e0; /* Cor do texto na tabela */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
         }
 
-        th, td { 
-            border: 1px solid #333; /* Borda mais sutil */
-            padding: 12px; /* Aumento do padding para melhor legibilidade */
-            text-align: center; 
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: var(--table-bg);
+            color: var(--text-color);
         }
 
-        th { 
-            background-color: #333333; /* Fundo dos cabeçalhos */
-            color: #ffffff; /* Texto dos cabeçalhos */
+        th, td {
+            border: 1px solid var(--border-color);
+            padding: 12px;
+            text-align: center;
         }
 
-        /* Estilo dos Botões */
-        button { 
-            padding: 8px 16px; 
-            margin: 0 4px; 
-            cursor: pointer; 
+        th {
+            background-color: var(--header-bg);
+            color: var(--header-text);
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 0 4px;
+            cursor: pointer;
             border: none;
             border-radius: 4px;
             font-weight: bold;
         }
 
-        /* Botões 'Y' e 'N' */
-        .btn-yes {
-            background-color: #4CAF50; /* Verde para 'Y' */
-            color: white;
-        }
+        .btn-yes { background-color: var(--green); color: white; }
+        .btn-no { background-color: var(--red); color: white; }
+        button:disabled { background-color: var(--disabled-bg); cursor: not-allowed; color: var(--disabled-text); }
 
-        .btn-no {
-            background-color: #f44336; /* Vermelho para 'N' */
-            color: white;
-        }
+        .status-y { color: var(--green); font-weight: bold; }
+        .status-n { color: var(--red); font-weight: bold; }
 
-        /* Botões Desabilitados */
-        button:disabled { 
-            background-color: #555; 
-            cursor: not-allowed; 
-            color: #ccc;
-        }
+        h1 { color: white; text-align: center; margin-bottom: 20px; }
+        p { font-size: 1.2em; margin-bottom: 20px; }
+        #onlineCount { font-weight: bold; color: var(--green); }
+        #logContainer { white-space: pre-wrap; background-color: var(--table-bg); padding: 10px; border: 1px solid var(--border-color); margin-top: 20px; }
 
-        /* Status */
-        .status-y { 
-            color: #4CAF50; /* Verde para 'Y' */
-            font-weight: bold; 
-        }
-
-        .status-n { 
-            color: #f44336; /* Vermelho para 'N' */
-            font-weight: bold; 
-        }
-
-        /* Título */
-        h1 {
-            color: #ffffff; /* Título em branco */
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        p {
-            font-size: 1.2em;
-            margin-bottom: 20px;
-        }
-
-        #onlineCount {
-            font-weight: bold;
-            color: #4CAF50; /* Verde para indicar status online */
-        }
     </style>
 </head>
 <body>
     <h1>Processos Suspeitos</h1>
-    <!-- Aqui adicionamos o botão "Visualizar" ao lado -->
-    <p>
-        Máquinas Online Monitoradas: <span id="onlineCount">0</span>
-        <button id="viewMachinesBtn">Visualizar</button>
-    </p>
-    <!-- E essa div abaixo para exibir a lista -->
+    <p>Máquinas Online Monitoradas: <span id="onlineCount">0</span> <button id="viewMachinesBtn">Visualizar</button></p>
     <div id="machineList" style="margin-bottom: 20px;"></div>
 
+    <p><button id="viewLogBtn">Visualizar Log</button></p>
+    <div id="logContainer"></div>
+
     <table id="suspectsTable">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Máquina</th>
-                <th>Mensagem</th>
-                <th>Ação</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            <!-- Linhas serão adicionadas dinamicamente -->
-        </tbody>
+        <thead><tr><th>ID</th><th>Máquina</th><th>Mensagem</th><th>Ação</th><th>Status</th></tr></thead>
+        <tbody></tbody>
     </table>
 
     <script>
-        // Função para padronizar a resposta para minúsculas
-        function standardizeResponse(response) {
-            return response.toLowerCase();
-        }
+        const standardizeResponse = response => response.toLowerCase();
+        const tbody = document.querySelector('#suspectsTable tbody');
+        const machineListDiv = document.getElementById('machineList');
+        const logContainer = document.getElementById('logContainer');
+        const onlineCountSpan = document.getElementById('onlineCount');
 
-        // -------------------------------------
-        // BUSCAR LISTA DE SUSPEITOS
-        // -------------------------------------
-        async function fetchSuspects() {
+        const createButton = (text, className, clickHandler) => {
+            const btn = document.createElement('button');
+            btn.textContent = text;
+            btn.className = className;
+            btn.onclick = clickHandler;
+            return btn;
+        };
+
+        const updateSuspectRow = (tr, suspect) => {
+            const tdAction = tr.children[3];
+            const tdStatus = tr.children[4];
+
+            if (suspect.response) {
+                tdAction.textContent = '-';
+                const response = standardizeResponse(suspect.response);
+                tdStatus.textContent = response.toUpperCase();
+                tdStatus.classList.toggle('status-y', response === 'y');
+                tdStatus.classList.toggle('status-n', response === 'n');
+            } else {
+                tdAction.innerHTML = '';
+                tdAction.appendChild(createButton('Y', 'btn-yes', () => respondSuspect(suspect.id, 'y', tr)));
+                tdAction.appendChild(createButton('N', 'btn-no', () => respondSuspect(suspect.id, 'n', tr)));
+                tdStatus.textContent = '-';
+            }
+        };
+
+
+        const renderSuspects = data => {
+            tbody.innerHTML = '';
+            data.forEach(suspect => {
+                const tr = document.createElement('tr');
+                ['id', 'agent', 'message'].forEach(key => {
+                    const td = document.createElement('td');
+                    td.textContent = suspect[key];
+                    tr.appendChild(td);
+                });
+                tr.appendChild(document.createElement('td')); // Placeholder for actions
+                tr.appendChild(document.createElement('td')); // Placeholder for status
+                updateSuspectRow(tr, suspect);
+                tbody.appendChild(tr);
+            });
+        };
+
+        const fetchSuspects = async () => {
             try {
                 const response = await fetch('/api/suspects');
-                if (!response.ok) {
-                    throw new Error('Erro ao buscar suspeitos: ' + response.statusText);
-                }
-                const data = await response.json();
-                console.log('Dados recebidos:', data); // Log para depuração
-
-                const tbody = document.querySelector('#suspectsTable tbody');
-                tbody.innerHTML = '';
-
-                data.forEach(suspect => {
-                    const tr = document.createElement('tr');
-
-                    // ID
-                    const tdID = document.createElement('td');
-                    tdID.textContent = suspect.id;
-                    tr.appendChild(tdID);
-
-                    // Agente
-                    const tdAgent = document.createElement('td');
-                    tdAgent.textContent = suspect.agent;
-                    tr.appendChild(tdAgent);
-
-                    // Mensagem
-                    const tdMessage = document.createElement('td');
-                    tdMessage.textContent = suspect.message;
-                    tr.appendChild(tdMessage);
-
-                    // Ação (Botões)
-                    const tdAction = document.createElement('td');
-                    if (!suspect.response) { 
-                        const btnYes = document.createElement('button');
-                        btnYes.textContent = 'Y';
-                        btnYes.classList.add('btn-yes');
-                        btnYes.onclick = () => respondSuspect(suspect.id, 'y', tr);
-
-                        const btnNo = document.createElement('button');
-                        btnNo.textContent = 'N';
-                        btnNo.classList.add('btn-no');
-                        btnNo.onclick = () => respondSuspect(suspect.id, 'n', tr);
-
-                        tdAction.appendChild(btnYes);
-                        tdAction.appendChild(btnNo);
-                    } else {
-                        tdAction.textContent = '-';
-                    }
-                    tr.appendChild(tdAction);
-
-                    // Status
-                    const tdStatus = document.createElement('td');
-                    if (suspect.response) {
-                        const responseStandard = standardizeResponse(suspect.response);
-                        if (responseStandard === 'y') {
-                            tdStatus.textContent = 'Y';
-                            tdStatus.classList.add('status-y');
-                        } else if (responseStandard === 'n') {
-                            tdStatus.textContent = 'N';
-                            tdStatus.classList.add('status-n');
-                        } else {
-                            tdStatus.textContent = '-';
-                        }
-                    } else {
-                        tdStatus.textContent = '-';
-                    }
-                    tr.appendChild(tdStatus);
-
-                    tbody.appendChild(tr);
-                });
+                if (!response.ok) throw new Error(`Erro ao buscar suspeitos: ${response.statusText}`);
+                renderSuspects(await response.json());
             } catch (error) {
                 console.error('Erro ao buscar suspeitos:', error);
-                alert('Não foi possível carregar os suspeitos. Verifique o console para mais detalhes.');
+                alert('Não foi possível carregar os suspeitos.');
             }
-        }
+        };
 
-        // -------------------------------------
-        // ENVIAR RESPOSTA DO OPERADOR
-        // -------------------------------------
-        async function respondSuspect(id, response, tableRow) {
+        const respondSuspect = async (id, response, tableRow) => {
             try {
-                console.log(`Enviando resposta para o suspeito ID ${id}: ${response}`);
                 const res = await fetch(`/api/suspects/${id}/response`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ response })
                 });
-
-                if (!res.ok) {
-                    const errorText = await res.text();
-                    throw new Error('Erro ao enviar resposta: ' + res.statusText + ' - ' + errorText);
-                }
-
-                const resData = await res.json();
-                console.log('Resposta do servidor:', resData);
-
-                // Atualizar a linha específica com o status
-                const tdAction = tableRow.children[3];
-                tdAction.innerHTML = '-';
-
-                const tdStatus = tableRow.children[4];
-                if (response === 'y') {
-                    tdStatus.textContent = 'Y';
-                    tdStatus.classList.remove('status-n');
-                    tdStatus.classList.add('status-y');
-                } else {
-                    tdStatus.textContent = 'N';
-                    tdStatus.classList.remove('status-y');
-                    tdStatus.classList.add('status-n');
-                }
+                if (!res.ok) throw new Error(`Erro ao enviar resposta: ${res.statusText}`);
+                updateSuspectRow(tableRow, await res.json());
             } catch (error) {
                 console.error('Erro ao enviar resposta:', error);
-                alert('Não foi possível enviar a resposta. Verifique o console para mais detalhes.');
+                alert('Não foi possível enviar a resposta.');
             }
-        }
+        };
 
-        // -------------------------------------
-        // BUSCAR CONTAGEM DE MÁQUINAS ONLINE
-        // -------------------------------------
-        async function fetchOnlineCount() {
+        const fetchOnlineCount = async () => {
             try {
                 const response = await fetch('/api/online_count');
-                if (!response.ok) {
-                    throw new Error('Erro ao buscar contagem de máquinas online: ' + response.statusText);
-                }
-                const data = await response.json();
-                document.getElementById('onlineCount').textContent = data.online;
+                if (!response.ok) throw new Error(`Erro ao buscar contagem online: ${response.statusText}`);
+                onlineCountSpan.textContent = (await response.json()).online;
             } catch (error) {
-                console.error('Erro ao buscar contagem de máquinas online:', error);
+                console.error('Erro ao buscar contagem online:', error);
             }
-        }
+        };
 
-        // -------------------------------------
-        // BUSCAR LISTA DE MÁQUINAS ONLINE
-        // -------------------------------------
-        async function fetchOnlineAgents() {
+
+        const fetchOnlineAgents = async () => {
             try {
                 const response = await fetch('/api/online_agents');
-                if (!response.ok) {
-                    throw new Error('Erro ao buscar lista de máquinas: ' + response.statusText);
-                }
-                const data = await response.json(); // array de strings (IDs)
-
-                const machineListDiv = document.getElementById('machineList');
-                machineListDiv.innerHTML = '';
-
-                if (data.length === 0) {
-                    machineListDiv.textContent = 'Nenhuma máquina online no momento.';
-                    return;
-                }
-
-                data.forEach(agentID => {
-                    const p = document.createElement('p');
-                    p.textContent = '- ' + agentID;
-                    machineListDiv.appendChild(p);
-                });
+                if (!response.ok) throw new Error(`Erro ao buscar máquinas online: ${response.statusText}`);
+                const data = await response.json();
+                machineListDiv.innerHTML = data.length ? data.map(agentID => `<p>- ${agentID}</p>`).join('') : 'Nenhuma máquina online.';
             } catch (error) {
                 console.error('Erro ao buscar agentes online:', error);
             }
-        }
+        };
 
-        // -------------------------------------
-        // TOGGLE: Mostra/oculta a lista de máquinas
-        // -------------------------------------
-        function toggleOnlineAgents() {
-            const machineListDiv = document.getElementById('machineList');
+        const toggleElementContent = (element, fetchFunction) => {
+            element.innerHTML.trim() === '' ? fetchFunction() : element.innerHTML = '';
+        };
 
-            // Se a div estiver vazia (ou só espaços), buscamos e mostramos.
-            if (machineListDiv.innerHTML.trim() === '') {
-                fetchOnlineAgents(); 
-            } else {
-                // Se já estiver preenchida, limpamos para ocultar.
-                machineListDiv.innerHTML = '';
+
+        const fetchLog = async () => {
+            try {
+                const response = await fetch('/api/log');
+                if (!response.ok) throw new Error(`Erro ao buscar o log: ${response.statusText}`);
+                logContainer.textContent = JSON.stringify(await response.json(), null, 2);
+            } catch (error) {
+                console.error('Erro ao buscar log:', error);
+                alert('Não foi possível carregar o log.');
             }
-        }
+        };
 
         fetchSuspects();
         fetchOnlineCount();
+        setInterval(fetchSuspects, 3000);
+        setInterval(fetchOnlineCount, 3000);
 
-        // Atualizar periodicamente
-        setInterval(fetchSuspects, 5000);
-        setInterval(fetchOnlineCount, 5000);
+        document.getElementById('viewMachinesBtn').addEventListener('click', () => toggleElementContent(machineListDiv, fetchOnlineAgents));
+        document.getElementById('viewLogBtn').addEventListener('click', () => toggleElementContent(logContainer, fetchLog));
 
-        // Botão "Visualizar"
-        document.getElementById('viewMachinesBtn').addEventListener('click', toggleOnlineAgents);
     </script>
 </body>
 </html>

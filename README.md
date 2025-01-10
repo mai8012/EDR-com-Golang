@@ -26,7 +26,7 @@ Gestão de Processos Suspeitos:
 
 
 Suspensão de Processos: Quando um processo suspeito é identificado, o agente suspende sua execução temporariamente utilizando chamadas de sistema específicas do Windows (NtSuspendProcess).
-Registro de Suspeitas: Detalhes do processo suspeito, incluindo nome, caminho, PID, endereços IP e hostname, são registrados localmente em um arquivo de log (log.txt) e enviados para um servidor central para avaliação.
+Registro de Suspeitas: Detalhes do processo suspeito, incluindo nome, caminho, PID, endereços IP e hostname, são enviados para um servidor central para avaliação.
 
 
 ![image](https://github.com/user-attachments/assets/24e15751-e523-44c6-b609-7dfe978bd11a)

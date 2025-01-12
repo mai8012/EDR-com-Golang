@@ -29,16 +29,19 @@ type Agent struct {
 }
 
 var (
-	agents               = make(map[string]time.Time)
-	agentsLock           sync.Mutex
-	suspectChan          = make(chan SuspectRequest, 1000)
-	uiChan               = make(chan func(), 1000)
-	messages             = []SuspectRequest{}
-	messagesLock         sync.Mutex
-	pendingResponses     = make(map[int]string)
-	pendingResponsesLock sync.Mutex
-	suspectID            int
-	suspectIDLock        sync.Mutex
+	agents                  = make(map[string]time.Time)
+	agentsLock              sync.Mutex
+	suspectChan             = make(chan SuspectRequest, 1000)
+	uiChan                  = make(chan func(), 1000)
+	messages                = []SuspectRequest{}
+	messagesLock            sync.Mutex
+	pendingResponses        = make(map[int]string)
+	pendingResponsesLock    sync.Mutex
+	suspectID               int
+	suspectIDLock           sync.Mutex
+	serverStartTime         = time.Now()
+	suspectProcessCount     int
+	suspectProcessCountLock sync.Mutex
 )
 
 func main() {
@@ -50,6 +53,10 @@ func main() {
 	r.HandleFunc("/api/suspects", handleListSuspects).Methods("GET")
 	r.HandleFunc("/api/suspects/responses", handleGetResponses).Methods("GET")
 
+	// Novos endpoints para monitoramento de uptime e contador de processos suspeitos
+	r.HandleFunc("/api/uptime", handleUptime).Methods("GET")
+	r.HandleFunc("/api/suspect_count", handleSuspectCount).Methods("GET")
+
 	// Novos endpoints para monitoramento de agentes online
 	r.HandleFunc("/api/ping", handlePing).Methods("POST")
 	r.HandleFunc("/api/online_count", handleOnlineCount).Methods("GET")
@@ -58,8 +65,11 @@ func main() {
 	// Endpoint log.JSON
 	r.HandleFunc("/api/log", handleGetLog).Methods("GET")
 
-	// Servir arquivos estáticos e a interface web
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/")))
+	// Endpoint de logout
+	r.HandleFunc("/api/logout", handleLogout).Methods("POST")
+
+	// Protege o acesso aos arquivos estáticos com autenticação básica
+	r.PathPrefix("/").Handler(basicAuth(http.FileServer(http.Dir("./static/"))))
 
 	// Iniciar o consumidor da fila de [SUSPEITO]
 	go handleSuspects()
@@ -73,11 +83,23 @@ func main() {
 	log.Fatal(http.ListenAndServe(":7777", r))
 }
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// //////////////////////////////////////////////////  PING  ///////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+func basicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "admin" || pass != "admin" {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+}
+
 func handleOnlineAgents(w http.ResponseWriter, r *http.Request) {
 	agentsLock.Lock()
 	defer agentsLock.Unlock()
@@ -131,17 +153,6 @@ func handleOnlineCount(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]int{"online": count})
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////Ping Fim///////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// //////////////////////////////////////////////////Leitura Suspeitos//////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // handleReceiveSuspect recebe suspeitas dos agentes via POST
 func handleReceiveSuspect(w http.ResponseWriter, r *http.Request) {
 	var req SuspectRequest
@@ -159,6 +170,11 @@ func handleReceiveSuspect(w http.ResponseWriter, r *http.Request) {
 	messagesLock.Lock()
 	messages = append(messages, req)
 	messagesLock.Unlock()
+
+	// Incrementar o contador de processos suspeitos
+	suspectProcessCountLock.Lock()
+	suspectProcessCount++
+	suspectProcessCountLock.Unlock()
 
 	// Enviar para a fila de processamento
 	suspectChan <- req
@@ -196,7 +212,6 @@ func handleRespondSuspect(w http.ResponseWriter, r *http.Request) {
 	messagesLock.Lock()
 	defer messagesLock.Unlock()
 
-	// Achar no slice
 	var indexToRemove = -1
 	var foundMessage SuspectRequest
 	for i, m := range messages {
@@ -220,7 +235,6 @@ func handleRespondSuspect(w http.ResponseWriter, r *http.Request) {
 
 	messages = append(messages[:indexToRemove], messages[indexToRemove+1:]...)
 
-	// Resposta HTTP
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "mensagem removida com sucesso"})
 }
@@ -241,7 +255,6 @@ func handleGetResponses(w http.ResponseWriter, r *http.Request) {
 			response, exists := pendingResponses[id]
 			if exists {
 				decisions = append(decisions, Decision{MessageID: id, Response: response})
-				// Remover a resposta após ser enviada
 				delete(pendingResponses, id)
 			}
 			pendingResponsesLock.Unlock()
@@ -272,7 +285,6 @@ func split(s, sep string) []string {
 // handleSuspects processa suspeitas da fila
 func handleSuspects() {
 	for suspect := range suspectChan {
-		// Processar a suspeita e aguardar a resposta do operador
 		fmt.Printf("Nova suspeita recebida: %+v\n", suspect)
 	}
 }
@@ -284,17 +296,6 @@ func handleUIUpdates() {
 	}
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////Leitura Suspeitos Fim//////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// //////////////////////////////////////////////////Log JSON///////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type LogEntry struct {
 	ID       int    `json:"id"`
 	Agent    string `json:"agent"`
@@ -305,7 +306,6 @@ type LogEntry struct {
 
 // Função para logar no formato JSON
 func logMessage(msg SuspectRequest, response string) {
-	// Montar o struct
 	entry := LogEntry{
 		ID:       msg.ID,
 		Agent:    msg.Agent,
@@ -314,21 +314,16 @@ func logMessage(msg SuspectRequest, response string) {
 		DateTime: time.Now().Format("2006-01-02 15:04:05"),
 	}
 
-	// Ler o arquivo inteiro (caso queira manter um array de logs)
-	// Se o arquivo ainda não existir ou estiver vazio, iniciamos um array vazio.
 	var logs []LogEntry
 
-	// Se conseguir abrir, tentamos decodificar
 	b, err := os.ReadFile("log.json")
 	if err == nil {
-		// Se não der erro, tentamos decodificar o que tem lá
+
 		_ = json.Unmarshal(b, &logs)
 	}
 
-	// Adiciona o novo log
 	logs = append(logs, entry)
 
-	// (Re)escreve o arquivo JSON com o array completo
 	newData, err := json.MarshalIndent(logs, "", "  ")
 	if err != nil {
 		log.Println("Erro ao converter logs para JSON:", err)
@@ -351,8 +346,16 @@ func handleGetLog(w http.ResponseWriter, r *http.Request) {
 	w.Write(content)
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////Log JSON Fim///////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// handleUptime retorna o uptime do servidor
+func handleUptime(w http.ResponseWriter, r *http.Request) {
+	uptime := time.Since(serverStartTime)
+	json.NewEncoder(w).Encode(map[string]string{"uptime": uptime.String()})
+}
+
+// handleSuspectCount retorna o contador de processos suspeitos
+func handleSuspectCount(w http.ResponseWriter, r *http.Request) {
+	suspectProcessCountLock.Lock()
+	count := suspectProcessCount
+	suspectProcessCountLock.Unlock()
+	json.NewEncoder(w).Encode(map[string]int{"suspect_count": count})
+}

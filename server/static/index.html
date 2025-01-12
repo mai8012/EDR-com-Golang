@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Servidor EDR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoramento</title>
     <style>
         :root {
             --bg-color: #121212;
@@ -73,6 +74,11 @@
     <p><button id="viewLogBtn">Visualizar Log</button></p>
     <div id="logContainer"></div>
 
+    <p>Uptime do Servidor: <span id="uptime">Carregando...</span></p>
+    <p>Contador de Processos Suspeitos: <span id="suspectCount">Carregando...</span></p>
+
+    <p><button id="logoutBtn">Logout</button></p>
+
     <table id="suspectsTable">
         <thead><tr><th>ID</th><th>Máquina</th><th>Mensagem</th><th>Ação</th><th>Status</th></tr></thead>
         <tbody></tbody>
@@ -121,8 +127,8 @@
                     td.textContent = suspect[key];
                     tr.appendChild(td);
                 });
-                tr.appendChild(document.createElement('td')); // Placeholder for actions
-                tr.appendChild(document.createElement('td')); // Placeholder for status
+                tr.appendChild(document.createElement('td')); 
+                tr.appendChild(document.createElement('td')); 
                 updateSuspectRow(tr, suspect);
                 tbody.appendChild(tr);
             });
@@ -192,14 +198,56 @@
             }
         };
 
+        const fetchUptime = async () => {
+            try {
+                const response = await fetch('/api/uptime');
+                if (!response.ok) throw new Error(`Erro ao buscar uptime: ${response.statusText}`);
+                const data = await response.json();
+                document.getElementById('uptime').textContent = data.uptime;
+            } catch (error) {
+                console.error('Erro ao buscar uptime:', error);
+                alert('Não foi possível carregar o uptime.');
+            }
+        };
+
+        const fetchSuspectCount = async () => {
+            try {
+                const response = await fetch('/api/suspect_count');
+                if (!response.ok) throw new Error(`Erro ao buscar contador de processos suspeitos: ${response.statusText}`);
+                const data = await response.json();
+                document.getElementById('suspectCount').textContent = data.suspect_count;
+            } catch (error) {
+                console.error('Erro ao buscar contador de processos suspeitos:', error);
+                alert('Não foi possível carregar o contador de processos suspeitos.');
+            }
+        };
+
         fetchSuspects();
         fetchOnlineCount();
+        fetchUptime();
+        fetchSuspectCount();
         setInterval(fetchSuspects, 3000);
         setInterval(fetchOnlineCount, 3000);
+        setInterval(fetchUptime, 3000);
+        setInterval(fetchSuspectCount, 3000);
 
         document.getElementById('viewMachinesBtn').addEventListener('click', () => toggleElementContent(machineListDiv, fetchOnlineAgents));
         document.getElementById('viewLogBtn').addEventListener('click', () => toggleElementContent(logContainer, fetchLog));
 
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            fetch('/api/logout', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Basic ' + btoa('invalid:invalid')
+                }
+            }).then(() => {
+                alert('Você foi deslogado.');
+                window.location.reload();
+            }).catch(error => {
+                console.error('Erro ao deslogar:', error);
+                alert('Não foi possível deslogar.');
+            });
+        });
     </script>
 </body>
 </html>

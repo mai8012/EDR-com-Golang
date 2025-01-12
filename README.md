@@ -27,7 +27,8 @@ Processos localizados em diretórios ignorados (como C:\Windows\, C:\Program Fil
 Gestão de Processos Suspeitos:
 
 
-![image](https://github.com/user-attachments/assets/868c020f-df83-41a1-ad34-6d54b318d877)
+![image](https://github.com/user-attachments/assets/56c4e3b6-39a2-4173-b4bd-e0336653d57b)
+
 
 
 

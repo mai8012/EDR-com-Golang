@@ -1,21 +1,10 @@
 EDR desenvolvido em Go (Golang) para monitoramento e resposta a atividades suspeitas em endpoints Windows.
 
-
-
-
-Escaneamento Contínuo: 
-
 O agente escaneia os processos em execução no sistema.
-
-Diretórios Monitorados: 
 
 Detecta processos executados a partir de diretórios específicos considerados suspeitos.
 
-Nomes de Processos Suspeitos: 
-
 Identifica processos com nomes que indicam potencial atividade maliciosa, como powershell, cmd.exe, wscript, entre outros.
-
-Ignorar Processos Legítimos: 
 
 Processos localizados em diretórios ignorados (como C:\Windows\, C:\Program Files\, etc.) ou que estão na lista de processos permitidos são excluídos da análise.
 

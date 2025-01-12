@@ -63,7 +63,7 @@ func main() {
 	// depois de criada a tarefa temos uma verificação para ver se a tarefa esta criada
 	// então uma vez configurado não vai pedir novamente
 	// e todo usuario que logar na maquina mesmo não sendo admin o agent vai startar com privilegios
-	 addtask.AddScheduledTask()
+	addtask.AddScheduledTask()
 
 	// Identificador único do agente
 	agentID := getAgentIdentifier()
@@ -254,7 +254,6 @@ func fetchResponses(client *http.Client, serverURL string, decisionsChan chan<- 
 		return
 	}
 
-	// Se chegou até aqui, temos respostas válidas do servidor
 	for _, decision := range decisions {
 		decisionsChan <- decision
 

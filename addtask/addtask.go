@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/term" //Manipulação avançada de terminais, útil para interações seguras com o usuário.
+	"golang.org/x/term"
 )
 
 func AddScheduledTask() {
@@ -33,10 +33,8 @@ func AddScheduledTask() {
 		return
 	}
 
-	// Envolver o caminho do executável em aspas para lidar com espaços no caminho
 	exePathQuoted := fmt.Sprintf("\"%s\"", exePath)
 
-	// 3. Obter o nome de usuário atual
 	currentUser, err := user.Current()
 	if err != nil {
 		fmt.Println("Erro ao obter o usuário atual:", err)
@@ -44,14 +42,12 @@ func AddScheduledTask() {
 	}
 
 	username := currentUser.Username
-	// No Windows, o formato pode ser DOMAIN\Username ou Username
-	// Para garantir compatibilidade, podemos processar o nome de usuário
+	// DOMAIN\Username ou Username
 	if strings.Contains(username, "\\") {
 		parts := strings.Split(username, "\\")
 		username = parts[len(parts)-1]
 	}
 
-	// 4. Solicitar a senha do usuário
 	fmt.Printf("Por favor, insira a senha para a conta administrador '%s': ", username)
 	passwordBytes, err := ReadPassword()
 	if err != nil {
@@ -71,7 +67,6 @@ func AddScheduledTask() {
 		"/RP", password,
 	)
 
-	// 6. Executar o comando
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Printf("Erro ao criar a tarefa agendada: %v\nSaída: %s\n", err, string(output))

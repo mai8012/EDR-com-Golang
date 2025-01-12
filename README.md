@@ -49,6 +49,13 @@ Detalhes do processo suspeito, incluindo nome, caminho, PID, endereços IP e hos
 
 
 
+Servidor com autenticação:
+
+![image](https://github.com/user-attachments/assets/926242b8-2fcc-410d-aad1-4ed744d3c231)
+
+
+
+
 
 Atenção:ao iniciar o agent pela primeira vez:
 

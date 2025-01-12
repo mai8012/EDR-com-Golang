@@ -1,4 +1,5 @@
 EDR desenvolvido em Go (Golang) para monitoramento e resposta a atividades suspeitas em endpoints Windows.
+
 Para melhor entendimento assista o vídeo:
 https://youtu.be/Xh8kaPkSJeQ
 

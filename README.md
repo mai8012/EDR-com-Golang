@@ -42,7 +42,8 @@ Registro de Suspeitas:
 Detalhes do processo suspeito, incluindo nome, caminho, PID, endereços IP e hostname, são enviados para um servidor central para avaliação.
 
 
-![image](https://github.com/user-attachments/assets/24e15751-e523-44c6-b609-7dfe978bd11a)
+![image](https://github.com/user-attachments/assets/2742437b-8eb5-4013-89b3-2030bffb13a0)
+
 
 
 

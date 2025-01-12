@@ -1,4 +1,4 @@
-EDR Agent é uma aplicação desenvolvida em Go (Golang) para monitoramento e resposta a atividades suspeitas em endpoints Windows.
+EDR desenvolvido em Go (Golang) para monitoramento e resposta a atividades suspeitas em endpoints Windows.
 
 Para melhor entendimento das funcionalidade veja o video abaixo:
 

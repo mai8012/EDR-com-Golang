@@ -58,23 +58,14 @@ Atenção no lado do servidor é criado um arquivo log.json onde fica salvo as r
 
 
 
-Mapeamento de Mensagens: 
 
 Mantém um mapeamento de IDs de mensagens para processos suspeitos, garantindo que cada decisão recebida corresponda ao processo correto.
 
-Tratamento de Respostas Automáticas: 
-
 Em caso de perda de conexão com o servidor, o agente envia automaticamente a resposta "n" para todos os processos pendentes, finalizando-os.
-
-Detecção de Perda de Conexão: 
 
 Monitora a conexão com o servidor e detecta qualquer perda de conexão.
 
-Reconexão Automática: 
-
 Tenta reconectar automaticamente ao servidor em caso de falha na conexão.
-
-Gestão de Mensagens Pendentes: 
 
 Assegura que todas as mensagens pendentes sejam tratadas adequadamente em caso de desconexão.
 
